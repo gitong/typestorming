@@ -199,11 +199,11 @@ export class InputHandler {
             const pos = this.layout.positions.get(originId);
             // Offset based on type
             if (type === 'CHILD') {
-                x = pos.x + 150;
+                x = pos.x + 300;
                 y = pos.y + 50 * (Math.random() - 0.5);
             } else if (type === 'SIBLING') {
                 x = pos.x;
-                y = pos.y + 100;
+                y = pos.y + 150;
             }
         } else {
             // Center of screen

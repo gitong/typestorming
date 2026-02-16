@@ -8,9 +8,9 @@ export class ForceLayout {
         this.animationId = null;
 
         // Physics constants
-        this.repulsion = 5000;
-        this.springLength = 150;
-        this.springStrength = 0.05;
+        this.repulsion = 15000;
+        this.springLength = 250;
+        this.springStrength = 0.1;
         this.damping = 0.9;
         this.centerPull = 0.01;
 
@@ -26,8 +26,8 @@ export class ForceLayout {
         for (const [id, node] of this.graph.nodes) {
             if (!this.positions.has(id)) {
                 this.positions.set(id, {
-                    x: this.width / 2 + (Math.random() - 0.5) * 50,
-                    y: this.height / 2 + (Math.random() - 0.5) * 50,
+                    x: this.width / 2 + (Math.random() - 0.5) * 200,
+                    y: this.height / 2 + (Math.random() - 0.5) * 200,
                     vx: 0,
                     vy: 0,
                     pinned: false
