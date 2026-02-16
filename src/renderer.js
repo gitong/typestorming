@@ -88,12 +88,26 @@ export class Renderer {
         // Draw Edges
         ctx.strokeStyle = '#6366f1'; // accent color
         ctx.lineWidth = 2;
+
+        // Map for quick lookup of inverse edges
+        const edgeMap = new Set();
+        for (const edge of this.graph.edges) {
+            edgeMap.add(`${edge.from}-${edge.to}`);
+        }
+
         for (const edge of this.graph.edges) {
             const source = this.layout.positions.get(edge.from);
             const target = this.layout.positions.get(edge.to);
             if (!source || !target) continue;
 
-            this.drawArrow(ctx, source.x, source.y, target.x, target.y, edge.label);
+            // Check for reciprocal edge: target -> source
+            const hasReciprocal = edgeMap.has(`${edge.to}-${edge.from}`);
+
+            // If reciprocal exists, we curve to the right (offset positive)
+            // Since the other edge will also curve to ITS right (which is our left), they separate.
+            const offset = hasReciprocal ? 40 : 0;
+
+            this.drawArrow(ctx, source.x, source.y, target.x, target.y, edge.label, offset);
         }
 
         // Draw Nodes
@@ -157,30 +171,66 @@ export class Renderer {
         ctx.fillText(body, x, y + 15);
     }
 
-    drawArrow(ctx, x1, y1, x2, y2, label) {
+    drawArrow(ctx, x1, y1, x2, y2, label, offset = 0) {
         const dx = x2 - x1;
         const dy = y2 - y1;
-        const angle = Math.atan2(dy, dx);
         const dist = Math.sqrt(dx * dx + dy * dy);
 
-        // Shorten line to not overlap node rect (approx)
-        const nodeRadius = 80; // width/2 roughly
-        const startX = x1 + Math.cos(angle) * nodeRadius * 0.8;
-        const startY = y1 + Math.sin(angle) * 30 * 0.8; // height/2 roughly
-        const endX = x2 - Math.cos(angle) * nodeRadius * 0.9;
-        const endY = y2 - Math.sin(angle) * 30 * 0.9;
+        if (dist === 0) return;
+
+        // Midpoint
+        const mx = (x1 + x2) / 2;
+        const my = (y1 + y2) / 2;
+
+        // Control point calculation (Normal vector * offset)
+        // Normal vector (-dy, dx)
+        let cx = mx;
+        let cy = my;
+
+        if (offset !== 0) {
+            const len = Math.sqrt(dx * dx + dy * dy);
+            const nx = -dy / len;
+            const ny = dx / len;
+            cx = mx + nx * offset;
+            cy = my + ny * offset;
+        }
+
+        // Calculate intersection with Node Box (approximate)
+        // We use the angle from Control Point to End Point for better arrow entry
+        const angleToEnd = Math.atan2(y2 - cy, x2 - cx);
+        const angleFromStart = Math.atan2(cy - y1, cx - x1);
+
+        const nodeWidth = 160;
+        const nodeHeight = 60;
+
+        // Simple rectangular clipping approximation
+        // For accurate clipping we'd need exact intersection, but this suffices for UI
+        // We push the start/end points out from the node centers
+
+        // Rough radius proxy
+        const padding = 10;
+        // Use a heuristic: shorter axis dominant
+        const r = 50;
+
+        const startX = x1 + Math.cos(angleFromStart) * r;
+        const startY = y1 + Math.sin(angleFromStart) * 30; // ellipse-ish
+
+        const endX = x2 - Math.cos(angleToEnd) * r;
+        const endY = y2 - Math.sin(angleToEnd) * 30;
 
         ctx.beginPath();
         ctx.moveTo(startX, startY);
-        ctx.quadraticCurveTo((x1 + x2) / 2, (y1 + y2) / 2, endX, endY);
+        ctx.quadraticCurveTo(cx, cy, endX, endY);
         ctx.stroke();
 
         // Arrowhead
         const arrowSize = 6;
+        const arrowAngle = angleToEnd; // Tangent at end
+
         ctx.beginPath();
         ctx.moveTo(endX, endY);
-        ctx.lineTo(endX - arrowSize * Math.cos(angle - Math.PI / 6), endY - arrowSize * Math.sin(angle - Math.PI / 6));
-        ctx.lineTo(endX - arrowSize * Math.cos(angle + Math.PI / 6), endY - arrowSize * Math.sin(angle + Math.PI / 6));
+        ctx.lineTo(endX - arrowSize * Math.cos(arrowAngle - Math.PI / 6), endY - arrowSize * Math.sin(arrowAngle - Math.PI / 6));
+        ctx.lineTo(endX - arrowSize * Math.cos(arrowAngle + Math.PI / 6), endY - arrowSize * Math.sin(arrowAngle + Math.PI / 6));
         ctx.closePath();
         ctx.fillStyle = '#6366f1';
         ctx.fill();
@@ -188,11 +238,13 @@ export class Renderer {
         // Label
         if (label) {
             ctx.save();
-            ctx.translate((x1 + x2) / 2, (y1 + y2) / 2);
-            // Rotate text to align with line, but keep readable (upright)
-            let textAngle = angle;
-            if (textAngle > Math.PI / 2 || textAngle < -Math.PI / 2) textAngle += Math.PI;
-            // ctx.rotate(textAngle); // Optional: rotate label with line. Disabling for now for readability
+            // Position at peak of curve (t=0.5 for Quad Bezier is actually p_0.5 = 0.25*P0 + 0.5*P1 + 0.25*P2)
+            // But conceptually "cx, cy" is the control point, which pulls the curve.
+            // The actual midpoint of the curve is:
+            const midCurveX = 0.25 * startX + 0.5 * cx + 0.25 * endX;
+            const midCurveY = 0.25 * startY + 0.5 * cy + 0.25 * endY;
+
+            ctx.translate(midCurveX, midCurveY);
 
             ctx.font = '11px Inter, sans-serif';
             const textWidth = ctx.measureText(label).width;

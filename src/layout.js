@@ -7,10 +7,10 @@ export class ForceLayout {
         this.height = 600;
         this.animationId = null;
 
-        // Physics constants
-        this.repulsion = 15000;
-        this.springLength = 250;
-        this.springStrength = 0.1;
+        // Physics constants -- adjusted for wider spacing
+        this.repulsion = 50000;  // Greatly increased to push non-connected nodes apart
+        this.springLength = 350; // Increased length for connections
+        this.springStrength = 0.05; // Slightly weaker springs to allow repulsion to win
         this.damping = 0.9;
         this.centerPull = 0.01;
 
