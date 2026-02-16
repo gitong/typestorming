@@ -100,6 +100,14 @@ The app **reads** the markdown text and **renders** it as a visual node-and-edge
 **Then** only the **first declaration** should be used
 **And** subsequent declarations with the same ID should be ignored or flagged as a warning
 
+### Scenario: Rendering Reciprocal Relationships
+
+**Given** two nodes A and B have a bidirectional relationship (`A --> B` and `B --> A`)
+**When** the app renders the edges
+**Then** the edges should be curved away from each other to prevent overlap
+**And** arrowheads should clearly indicate direction
+**And** labels should be positioned along the curved path
+
 ---
 
 ## Feature 2: Intuitive Markdown Editing
