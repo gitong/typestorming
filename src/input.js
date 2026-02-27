@@ -117,26 +117,17 @@ export class InputHandler {
             return;
         }
 
-        // Tab: indent to child (of previous sibling)
-        if (e.key === 'Tab' && !e.shiftKey) {
+        // Tab: create child node of the selected node
+        if (e.key === 'Tab') {
             e.preventDefault();
             if (selectedId) {
-                this._indentToChild(selectedId);
-            }
-            return;
-        }
-
-        // Shift+Tab: outdent to sibling
-        if (e.key === 'Tab' && e.shiftKey) {
-            e.preventDefault();
-            if (selectedId) {
-                this._outdentToSibling(selectedId);
+                this._createChild(selectedId);
             }
             return;
         }
 
         // Space: enter edit mode
-        if (e.key === ' ' && selectedId) {
+        if ((e.key === ' ' || e.code === 'Space') && selectedId) {
             e.preventDefault();
             this._startEdit(selectedId);
             return;
@@ -472,31 +463,16 @@ export class InputHandler {
         setTimeout(() => this._startEdit(newId), 100);
     }
 
-    _indentToChild(nodeId) {
-        // Make nodeId a child of the previous sibling
-        const prevSibling = this.graph.getPrevSibling(nodeId);
-        if (!prevSibling) return;
+    _createChild(parentId) {
+        const newId = this.graph.generateId();
+        this.graph.addNode({ id: newId, title: '', body: '', level: 1 });
+        this.graph.addEdge({ from: parentId, to: newId, label: '' });
 
-        const parent = this.graph.getParent(nodeId);
-        if (parent) {
-            this.graph.removeEdge(parent.id, nodeId);
-        }
-        this.graph.addEdge({ from: prevSibling.id, to: nodeId, label: '' });
         this.layout.update();
-    }
+        this.renderer.selectedNodeId = newId;
+        this.renderer._updateSelection();
 
-    _outdentToSibling(nodeId) {
-        const parent = this.graph.getParent(nodeId);
-        if (!parent) return;
-
-        const grandparent = this.graph.getParent(parent.id);
-        // Remove edge from parent -> node
-        this.graph.removeEdge(parent.id, nodeId);
-
-        if (grandparent) {
-            this.graph.addEdge({ from: grandparent.id, to: nodeId, label: '' });
-        }
-        this.layout.update();
+        setTimeout(() => this._startEdit(newId), 100);
     }
 
     _deleteNode(nodeId) {
