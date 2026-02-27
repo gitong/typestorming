@@ -1,5 +1,5 @@
 # typeStorming — Specification
-### version 0.0.1
+### version 0.2.1
 ### Gherkin Format Specification
 
 
@@ -120,9 +120,9 @@ The app provides a **visual interface** so users can build and edit the graph wi
 
 The canvas operates in one of three distinct modes. The current mode determines how keyboard shortcuts behave:
 
-1. **Select Mode** (default) — A node is highlighted but not being edited. Arrow keys navigate, `Enter` creates siblings, `Tab` re-parents node as child of previous sibling.
-2. **Edit Mode** — The user is actively typing inside a node (title or body). Text input is captured by the node.
-3. **Edge Label Mode** — The cursor is on a relationship edge, awaiting label input.
+1. **Select Mode** (default) — A node is highlighted but not being edited. Arrow keys navigate, `Enter` creates siblings, `Tab` creates a child node.
+2. **Edit Mode** — The user is actively typing inside a node (title and body fields directly inside the node container). Text input is captured by the node.
+3. **Edge Label Mode** — The cursor is on a relationship edge, awaiting label input. Press `\` to finalize.
 
 ### Scenario: Auto-generating NodeID
 
@@ -138,27 +138,21 @@ The canvas operates in one of three distinct modes. The current mode determines 
 **And** it should be created at the same hierarchical level as node A
 **And** the app transitions to **Edit Mode** on the new node for title input
 
-### Scenario: Indenting to a child node (Tab) — Select Mode
+### Scenario: Creating a child node (Tab) — Select Mode
 
-**Given** the user is in **Select Mode** focused on a node B that immediately follows node A
+**Given** the user is in **Select Mode** focused on a node A
 **When** the user presses `Tab`
-**Then** node B is indented and becomes a child of node A
-**And** a relationship `A --> B` should be added to the Relationships section
-
-### Scenario: Outdenting to a sibling node (Shift + Tab) — Select Mode
-
-**Given** the user is in **Select Mode** focused on a child node B that has a parent node A
-**When** the user presses `Shift + Tab`
-**Then** node B is outdented to become a sibling of node A
-**And** the relationship in the markdown updates accordingly
+**Then** a new child node is created under node A
+**And** a relationship `A --> NewNode` is added to the Relationships section
+**And** the app transitions to **Edit Mode** on the new child node for title input
 
 ### Scenario: Editing node content inline (Space) — Select Mode → Edit Mode
 
 **Given** the user is in **Select Mode** with a node selected
 **When** the user presses `Space` (or double-clicks)
-**Then** the node enters **Edit Mode** **directly within the node itself (no popups or external modals)** for its title
-**When** the user presses `;` or `` ` `` while typing the title
-**Then** the editor shifts to editing the body content of the node inline
+**Then** the node enters **Edit Mode** with **title and body input fields displayed directly inside the node container** (no popups or external modals)
+**When** the user presses `\` (backslash) while editing the title
+**Then** the focus shifts to editing the body content of the node inline
 **And** the corresponding `NodeID[#Title; Body]` line in the Nodes section should be updated interactively
 
 ### Scenario: Completing a node edit and labeling the relationship — Edit Mode → Edge Label Mode
@@ -167,16 +161,16 @@ The canvas operates in one of three distinct modes. The current mode determines 
 **When** the user presses `Enter` to complete the node editing process
 **Then** the node's content is finalized
 **And** the cursor automatically jumps to the **most recently created** relationship edge connected to this node, entering **Edge Label Mode**
-**And** the user can type to define a relationship label, pressing `Enter` to finalize
-**And** if nothing is typed before pressing `Enter`, it falls back to an unlabeled relationship
-**And** after finalizing, the app returns to **Select Mode**
+**And** the user can type to define a relationship label, pressing `\` (backslash) to finalize
+**And** if nothing is typed before pressing `\`, it falls back to an unlabeled relationship
+**And** after finalizing, the app returns to **Select Mode** with the **newly created node selected**
 
 ### Scenario: Canceling edit or edge label (Escape)
 
 **Given** the user is in **Edit Mode** or **Edge Label Mode**
 **When** the user presses `Escape`
 **Then** the current editing action is canceled (reverted to the last saved state)
-**And** the app returns to **Select Mode**
+**And** the app returns to **Select Mode** with the **newly created node selected**
 
 ### Scenario: Linking an existing related node (Ctrl + Enter) — Edit Mode
 
@@ -212,25 +206,25 @@ The canvas operates in one of three distinct modes. The current mode determines 
 | CurrentNode  | Shortcut       | Action               | Explanation                                  |
 | :----------- | :------------- | :------------------- | :------------------------------------------- |
 | Any Node     | `Enter`        | Create Sibling       | Creates a new node at the same level         |
-| Any Node     | `Tab`          | Indent to Child      | Moves node to be a child of the previous node|
-| Child Node   | `Shift + Tab`  | Outdent to Sibling   | Moves node back to be a sibling              |
+| Any Node     | `Tab`          | Create Child         | Creates a new child node under selected node |
 | Any Node     | `Space`        | Edit Node            | Enters Edit Mode within the node             |
+| Any Node     | `-`            | Link to Node         | Opens spotlight to link to an existing node  |
 | Any Node     | `Delete`       | Delete Node          | Removes node and its relationships           |
 | Any Node     | `Escape`       | Deselect             | Clears the current selection                 |
+| No Selection | `Arrow`        | Select Latest Node   | Auto-selects the last created node           |
 
 **Examples (Edit Mode):**
 | CurrentNode  | Shortcut       | Action               | Explanation                                  |
 | :----------- | :------------- | :------------------- | :------------------------------------------- |
-| Editing Node | `;` or `` ` `` | Edit Body Content    | Shifts focus from title to body input        |
+| Editing Node | `\`           | Edit Body Content    | Shifts focus from title to body input        |
 | Editing Node | `Enter`        | Finish & Label Edge  | Completes edit, jumps to Edge Label Mode     |
 | Editing Node | `Ctrl + Enter` | Link Existing Node   | Opens spotlight search to find & link a node |
-| Editing Node | `Shift + Enter`| Insert New Line      | Inserts new line in text editor              |
 | Editing Node | `Escape`       | Cancel Edit          | Reverts changes, returns to Select Mode      |
 
 **Examples (Edge Label Mode):**
 | CurrentNode  | Shortcut       | Action               | Explanation                                  |
 | :----------- | :------------- | :------------------- | :------------------------------------------- |
-| Edge Label   | `Enter`        | Finish Edge Label    | Finalizes the edge (unlabeled if blank)      |
+| Edge Label   | `\`           | Finish Edge Label    | Finalizes the edge (unlabeled if blank)      |
 | Edge Label   | `Escape`       | Cancel Label         | Cancels label entry, returns to Select Mode  |
 
 ### Scenario Outline: Spatial vs. Logical Navigation
@@ -262,22 +256,31 @@ The canvas operates in one of three distinct modes. The current mode determines 
 
 ---
 
-## Feature 4: Quick Search and Linking Bar
+## Feature 4: Quick Search and Linking
 
-### Scenario: Global Quick Search & Jump (Ctrl + K)
+### Scenario: Link to existing node from Select Mode (`-` key)
 
-**When** the user presses `Ctrl + K`
-**Then** a quick search bar appears (spotlight style)
-**And** matching a keyword instantly highlights, selects, and jumps to that node
-**And** from the quick search bar, pressing `Tab` creates a new child node **of the matched/selected node**
-**Or** the user can connect the current node to an existing node
+**Given** the user is in **Select Mode** with Node A selected
+**When** the user presses `-` (dash/minus)
+**Then** a spotlight search bar appears with placeholder "Link to node…"
+**When** the user types to find a related node and presses `Enter` to select Node B
+**Then** a relationship `A --> B` is appended to the Relationships section
+**And** the app transitions to **Edge Label Mode** on the new edge
+**And** the user can type a label and press `\` to finalize
 
+### Scenario: Multi-select connection (Shift+Click + Enter)
+
+**Given** the user is in **Select Mode** and has selected Node A
+**And** the user holds `Shift` and clicks Node B (secondary selection, shown with cyan glow)
+**When** the user presses `Enter`
+**Then** a relationship `A --> B` is created
+**And** the app transitions to **Edge Label Mode** on the new edge
 
 ### Scenario: Quick Connect (Ctrl + Enter from Edit Mode)
 
 **Given** the user is in **Edit Mode** on Node A
 **When** the user presses `Ctrl + Enter`
-**Then** the spotlight quicksearch popup appears specifically to link nodes
+**Then** the spotlight search popup appears specifically to link nodes
 **When** the user searches for and selects Node B
 **Then** a relationship `A --> B` is seamlessly appended in the markdown
 **And** the canvas visually draws the edge and re-centers if necessary
@@ -291,10 +294,17 @@ The canvas operates in one of three distinct modes. The current mode determines 
 **When** a new element is added
 **Then** the system recalculates the layout using D3.js force simulation
 **And** the layout algorithm considers:
-- **Relative distance** or **Fixed distance (opt-in)**
-- Maintaining established distances between elements
+- **Link distance** of 300px between connected nodes
+- **Collision radius** of 150px to prevent overlap
+- **Charge repulsion** of -800 for spacing
 - **Weighted importance** derived from Heading levels (`#`, `##`) and content volume
 **And** disconnected nodes automatically receive a static, aligned position unless manually dragged
+
+### Scenario: Re-Layout for Optimal Readability
+**When** the user clicks the **⟳ Re-Layout** button (bottom-right of canvas)
+**Then** all pinned nodes are unpinned
+**And** the force simulation restarts with full energy
+**And** nodes settle into an optimally spaced arrangement
 
 ### Scenario: Collapsible & Semantic Zooming
 **When** a user collapses a node
