@@ -1,312 +1,376 @@
+/**
+ * TypeStorming Renderer — D3.js SVG-based rendering
+ * Renders nodes as rounded rect groups, edges as curved paths with arrowheads.
+ */
+
+import * as d3 from 'd3';
 
 export class Renderer {
-    constructor(canvas, graph, layout) {
-        this.canvas = canvas;
-        this.ctx = canvas.getContext('2d');
+    constructor(container, graph, layout) {
+        this.container = container;
         this.graph = graph;
         this.layout = layout;
 
-        this.offset = { x: 0, y: 0 };
-        this.scale = 1;
         this.selectedNodeId = null;
-        this.hoverNodeId = null;
+        this.onNodeClick = null;
+        this.onNodeDblClick = null;
+        this.onBackgroundClick = null;
+        this.onDragEnd = null;
 
-        // Connect layout tick to draw
-        this.layout.onTick = () => this.draw();
+        // Node sizing
+        this.nodeWidth = 170;
+        this.nodeHeight = 64;
+        this.nodeRadius = 10;
 
-        this.setupEvents();
-        this.resize();
-        window.addEventListener('resize', () => this.resize());
+        this._setup();
     }
 
-    resize() {
-        this.canvas.width = window.innerWidth;
-        this.canvas.height = window.innerHeight;
-        this.layout.setSize(this.canvas.width, this.canvas.height);
-        this.draw();
+    _setup() {
+        // Create SVG
+        this.svg = d3.select(this.container)
+            .append('svg')
+            .attr('width', '100%')
+            .attr('height', '100%')
+            .attr('id', 'graph-svg');
+
+        // Defs (arrowheads, filters)
+        const defs = this.svg.append('defs');
+
+        // Arrowhead marker
+        defs.append('marker')
+            .attr('id', 'arrowhead')
+            .attr('viewBox', '0 0 10 7')
+            .attr('refX', 10)
+            .attr('refY', 3.5)
+            .attr('markerWidth', 10)
+            .attr('markerHeight', 7)
+            .attr('orient', 'auto')
+            .append('polygon')
+            .attr('points', '0 0, 10 3.5, 0 7')
+            .attr('fill', '#6366f1');
+
+        // Glow filter for selection
+        const glowFilter = defs.append('filter')
+            .attr('id', 'glow')
+            .attr('x', '-50%')
+            .attr('y', '-50%')
+            .attr('width', '200%')
+            .attr('height', '200%');
+        glowFilter.append('feGaussianBlur')
+            .attr('stdDeviation', '4')
+            .attr('result', 'blur');
+        glowFilter.append('feFlood')
+            .attr('flood-color', '#6366f1')
+            .attr('flood-opacity', '0.6')
+            .attr('result', 'color');
+        glowFilter.append('feComposite')
+            .attr('in', 'color')
+            .attr('in2', 'blur')
+            .attr('operator', 'in')
+            .attr('result', 'shadow');
+        const glowMerge = glowFilter.append('feMerge');
+        glowMerge.append('feMergeNode').attr('in', 'shadow');
+        glowMerge.append('feMergeNode').attr('in', 'SourceGraphic');
+
+        // Main group for zoom/pan
+        this.g = this.svg.append('g').attr('class', 'canvas-root');
+
+        // Layer groups (edges below nodes)
+        this.edgeGroup = this.g.append('g').attr('class', 'edges-layer');
+        this.edgeLabelGroup = this.g.append('g').attr('class', 'edge-labels-layer');
+        this.nodeGroup = this.g.append('g').attr('class', 'nodes-layer');
+
+        // Zoom behavior
+        this.zoom = d3.zoom()
+            .scaleExtent([0.1, 5])
+            .on('zoom', (event) => {
+                this.g.attr('transform', event.transform);
+            });
+
+        this.svg.call(this.zoom);
+
+        // Set initial transform: center the viewport on (0,0)
+        requestAnimationFrame(() => {
+            const svgNode = this.svg.node();
+            if (svgNode) {
+                const w = svgNode.clientWidth || window.innerWidth;
+                const h = svgNode.clientHeight || window.innerHeight;
+                const initialTransform = d3.zoomIdentity.translate(w / 2, h / 2);
+                this.svg.call(this.zoom.transform, initialTransform);
+            }
+        });
+
+        // Click on background to deselect
+        this.svg.on('click', (event) => {
+            if (event.target === this.svg.node()) {
+                this.selectedNodeId = null;
+                this._updateSelection();
+                if (this.onBackgroundClick) this.onBackgroundClick();
+            }
+        });
     }
 
-    setupEvents() {
-        // Zoom handling
-        this.canvas.addEventListener('wheel', (e) => this.handleWheel(e), { passive: false });
-    }
-
-    handleWheel(e) {
-        e.preventDefault();
-
-        const zoomIntensity = 0.1;
-        const delta = e.deltaY < 0 ? 1 : -1;
-        const zoomFactor = Math.exp(delta * zoomIntensity);
-
-        // Calculate world coordinates of mouse before zoom
-        const rect = this.canvas.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
-
-        const worldPos = this.screenToWorld(mouseX, mouseY);
-
-        // Apply zoom
-        this.scale *= zoomFactor;
-
-        // Clamp scale
-        this.scale = Math.max(0.1, Math.min(this.scale, 5));
-
-        // Calculate new screen position of that world point
-        // screenX = (worldX - centerX) * scale + centerX + offset.x
-        // We want screenX to remain mouseX, so we solve for offset.x
-        // offset.x = mouseX - centerX - (worldX - centerX) * scale
-
-        const centerX = this.canvas.width / 2;
-        const centerY = this.canvas.height / 2;
-
-        this.offset.x = mouseX - centerX - (worldPos.x - centerX) * this.scale;
-        this.offset.y = mouseY - centerY - (worldPos.y - centerY) * this.scale;
-
-        this.draw();
-    }
-
-    screenToWorld(screenX, screenY) {
-        const centerX = this.canvas.width / 2;
-        const centerY = this.canvas.height / 2;
-
-        const worldX = (screenX - centerX - this.offset.x) / this.scale + centerX;
-        const worldY = (screenY - centerY - this.offset.y) / this.scale + centerY;
-
-        return { x: worldX, y: worldY };
+    // Build edge set for reciprocal check
+    _buildEdgeSet() {
+        const set = new Set();
+        for (const edge of this.graph.edges) {
+            set.add(`${edge.from}->${edge.to}`);
+        }
+        return set;
     }
 
     draw() {
-        const ctx = this.ctx;
-        ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+        const nodes = this.layout.nodeData;
+        const links = this.layout.linkData;
+        const edgeSet = this._buildEdgeSet();
 
-        ctx.save();
-        ctx.translate(this.canvas.width / 2 + this.offset.x, this.canvas.height / 2 + this.offset.y);
-        ctx.scale(this.scale, this.scale);
-        // Translate back so (0,0) is center of canvas before offset
-        ctx.translate(-this.canvas.width / 2, -this.canvas.height / 2);
+        // ===== EDGES =====
+        const edgePaths = this.edgeGroup.selectAll('.edge-path')
+            .data(links, d => `${d.source.id || d.source}-${d.target.id || d.target}`);
 
-        // Draw Edges
-        ctx.strokeStyle = '#6366f1'; // accent color
-        ctx.lineWidth = 2;
+        edgePaths.exit().remove();
 
-        // Map for quick lookup of inverse edges
-        const edgeMap = new Set();
-        for (const edge of this.graph.edges) {
-            edgeMap.add(`${edge.from}-${edge.to}`);
-        }
+        const edgeEnter = edgePaths.enter()
+            .append('path')
+            .attr('class', 'edge-path')
+            .attr('fill', 'none')
+            .attr('stroke', '#6366f1')
+            .attr('stroke-width', 2)
+            .attr('marker-end', 'url(#arrowhead)')
+            .attr('stroke-opacity', 0.7);
 
-        for (const edge of this.graph.edges) {
-            const source = this.layout.positions.get(edge.from);
-            const target = this.layout.positions.get(edge.to);
-            if (!source || !target) continue;
+        const allEdges = edgeEnter.merge(edgePaths);
+        allEdges.attr('d', d => this._edgePath(d, edgeSet));
 
-            // Check for reciprocal edge: target -> source
-            const hasReciprocal = edgeMap.has(`${edge.to}-${edge.from}`);
+        // ===== EDGE LABELS =====
+        const edgeLabels = this.edgeLabelGroup.selectAll('.edge-label-group')
+            .data(links.filter(d => d.label), d => `${d.source.id || d.source}-${d.target.id || d.target}`);
 
-            // If reciprocal exists, we curve to the right (offset positive)
-            // Since the other edge will also curve to ITS right (which is our left), they separate.
-            const offset = hasReciprocal ? 40 : 0;
+        edgeLabels.exit().remove();
 
-            this.drawArrow(ctx, source.x, source.y, target.x, target.y, edge.label, offset);
-        }
+        const labelEnter = edgeLabels.enter()
+            .append('g')
+            .attr('class', 'edge-label-group');
 
-        // Draw Nodes
-        for (const [id, node] of this.graph.nodes) {
-            const pos = this.layout.positions.get(id);
-            if (!pos) continue;
+        labelEnter.append('rect')
+            .attr('class', 'edge-label-bg')
+            .attr('rx', 3)
+            .attr('ry', 3);
 
-            this.drawNode(ctx, node, pos.x, pos.y, id === this.selectedNodeId);
-        }
+        labelEnter.append('text')
+            .attr('class', 'edge-label-text')
+            .attr('text-anchor', 'middle')
+            .attr('dominant-baseline', 'central')
+            .attr('fill', '#94a3b8')
+            .attr('font-size', '11px')
+            .attr('font-family', 'Inter, sans-serif');
 
-        ctx.restore();
-    }
+        const allLabels = labelEnter.merge(edgeLabels);
+        allLabels.each((d, i, els) => {
+            const g = d3.select(els[i]);
+            const sx = typeof d.source === 'object' ? d.source.x : 0;
+            const sy = typeof d.source === 'object' ? d.source.y : 0;
+            const tx = typeof d.target === 'object' ? d.target.x : 0;
+            const ty = typeof d.target === 'object' ? d.target.y : 0;
+            const mx = (sx + tx) / 2;
+            const my = (sy + ty) / 2;
 
-    drawNode(ctx, node, x, y, isSelected) {
-        const w = 160;
-        const h = 60;
-        const r = 8;
-
-        // Shadow/Glow
-        if (isSelected) {
-            ctx.shadowColor = '#6366f1';
-            ctx.shadowBlur = 15;
-        } else {
-            ctx.shadowColor = 'rgba(0,0,0,0.3)';
-            ctx.shadowBlur = 5;
-        }
-        ctx.shadowOffsetY = 2;
-
-        // Box
-        ctx.fillStyle = '#1e293b'; // slate-800
-        ctx.beginPath();
-        // roundRect polyfill or standard
-        if (ctx.roundRect) {
-            ctx.roundRect(x - w / 2, y - h / 2, w, h, r);
-        } else {
-            ctx.rect(x - w / 2, y - h / 2, w, h);
-        }
-        ctx.fill();
-
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
-
-        // Border
-        ctx.strokeStyle = isSelected ? '#6366f1' : '#334155';
-        ctx.lineWidth = isSelected ? 2 : 1;
-        ctx.stroke();
-
-        // Text
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-
-        // Title
-        ctx.fillStyle = '#f8fafc'; // slate-50
-        ctx.font = 'bold 14px Inter, sans-serif';
-        ctx.fillText(node.title, x, y - 10);
-
-        // Body
-        ctx.fillStyle = '#94a3b8'; // slate-400
-        ctx.font = '12px Inter, sans-serif';
-        const body = node.body.length > 20 ? node.body.substring(0, 17) + '...' : node.body;
-        ctx.fillText(body, x, y + 15);
-    }
-
-    drawArrow(ctx, x1, y1, x2, y2, label, offset = 0) {
-        const dx = x2 - x1;
-        const dy = y2 - y1;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-
-        if (dist === 0) return;
-
-        // Midpoint
-        const mx = (x1 + x2) / 2;
-        const my = (y1 + y2) / 2;
-
-        // Control point calculation (Normal vector * offset)
-        // Normal vector (-dy, dx)
-        let cx = mx;
-        let cy = my;
-
-        if (offset !== 0) {
-            const len = Math.sqrt(dx * dx + dy * dy);
-            const nx = -dy / len;
-            const ny = dx / len;
-            cx = mx + nx * offset;
-            cy = my + ny * offset;
-        }
-
-        // Calculate intersection with Node Box (approximate)
-        // We use the angle from Control Point to End Point for better arrow entry
-        const angleToEnd = Math.atan2(y2 - cy, x2 - cx);
-        const angleFromStart = Math.atan2(cy - y1, cx - x1);
-
-        const nodeWidth = 160;
-        const nodeHeight = 60;
-
-        // Simple rectangular clipping approximation
-        // For accurate clipping we'd need exact intersection, but this suffices for UI
-        // We push the start/end points out from the node centers
-
-        // Rough radius proxy
-        const padding = 10;
-        // Use a heuristic: shorter axis dominant
-        const r = 50;
-
-        const startX = x1 + Math.cos(angleFromStart) * r;
-        const startY = y1 + Math.sin(angleFromStart) * 30; // ellipse-ish
-
-        const endX = x2 - Math.cos(angleToEnd) * r;
-        const endY = y2 - Math.sin(angleToEnd) * 30;
-
-        ctx.beginPath();
-        ctx.moveTo(startX, startY);
-        ctx.quadraticCurveTo(cx, cy, endX, endY);
-        ctx.stroke();
-
-        // Arrowhead
-        const arrowSize = 6;
-        const arrowAngle = angleToEnd; // Tangent at end
-
-        ctx.beginPath();
-        ctx.moveTo(endX, endY);
-        ctx.lineTo(endX - arrowSize * Math.cos(arrowAngle - Math.PI / 6), endY - arrowSize * Math.sin(arrowAngle - Math.PI / 6));
-        ctx.lineTo(endX - arrowSize * Math.cos(arrowAngle + Math.PI / 6), endY - arrowSize * Math.sin(arrowAngle + Math.PI / 6));
-        ctx.closePath();
-        ctx.fillStyle = '#6366f1';
-        ctx.fill();
-
-        // Label
-        if (label) {
-            ctx.save();
-            // Position at peak of curve (t=0.5 for Quad Bezier is actually p_0.5 = 0.25*P0 + 0.5*P1 + 0.25*P2)
-            // But conceptually "cx, cy" is the control point, which pulls the curve.
-            // The actual midpoint of the curve is:
-            const midCurveX = 0.25 * startX + 0.5 * cx + 0.25 * endX;
-            const midCurveY = 0.25 * startY + 0.5 * cy + 0.25 * endY;
-
-            ctx.translate(midCurveX, midCurveY);
-
-            ctx.font = '11px Inter, sans-serif';
-            const textWidth = ctx.measureText(label).width;
-
-            // Label Background
-            ctx.fillStyle = '#0f172a';
-            ctx.fillRect(-textWidth / 2 - 4, -8, textWidth + 8, 16);
-
-            ctx.fillStyle = '#94a3b8';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(label, 0, 0);
-            ctx.restore();
-        }
-    }
-
-    // Hit testing logic for selection
-    getNodeAt(x, y) {
-        // Transform screen coords to world coords
-        const worldPos = this.screenToWorld(x, y);
-        const worldX = worldPos.x;
-        const worldY = worldPos.y;
-
-        for (const [id, _] of this.graph.nodes) {
-            const pos = this.layout.positions.get(id);
-            if (!pos) continue;
-
-            const dx = Math.abs(worldX - pos.x);
-            const dy = Math.abs(worldY - pos.y);
-
-            if (dx < 80 && dy < 30) {
-                return id;
+            // Check for reciprocal — if so, offset label
+            const hasReciprocal = edgeSet.has(`${d.target.id || d.target}->${d.source.id || d.source}`);
+            let lx = mx, ly = my;
+            if (hasReciprocal) {
+                const dx = tx - sx;
+                const dy = ty - sy;
+                const len = Math.sqrt(dx * dx + dy * dy) || 1;
+                lx = mx + (-dy / len) * 30;
+                ly = my + (dx / len) * 30;
             }
+
+            const text = g.select('text').text(d.label);
+            g.attr('transform', `translate(${lx}, ${ly})`);
+
+            // Size bg rect to text
+            const bbox = text.node().getBBox();
+            g.select('rect')
+                .attr('x', bbox.x - 4)
+                .attr('y', bbox.y - 2)
+                .attr('width', bbox.width + 8)
+                .attr('height', bbox.height + 4)
+                .attr('fill', '#0f172a')
+                .attr('stroke', 'none');
+        });
+
+        // ===== NODES =====
+        const nodeGroups = this.nodeGroup.selectAll('.node-group')
+            .data(nodes, d => d.id);
+
+        nodeGroups.exit().remove();
+
+        const nodeEnter = nodeGroups.enter()
+            .append('g')
+            .attr('class', 'node-group')
+            .attr('cursor', 'pointer')
+            .call(this._drag());
+
+        // Background rect
+        nodeEnter.append('rect')
+            .attr('class', 'node-rect')
+            .attr('width', this.nodeWidth)
+            .attr('height', this.nodeHeight)
+            .attr('rx', this.nodeRadius)
+            .attr('ry', this.nodeRadius)
+            .attr('x', -this.nodeWidth / 2)
+            .attr('y', -this.nodeHeight / 2);
+
+        // Title text
+        nodeEnter.append('text')
+            .attr('class', 'node-title')
+            .attr('text-anchor', 'middle')
+            .attr('dominant-baseline', 'central')
+            .attr('y', -8)
+            .attr('fill', '#f8fafc')
+            .attr('font-weight', 'bold')
+            .attr('font-size', '14px')
+            .attr('font-family', 'Inter, sans-serif');
+
+        // Body text
+        nodeEnter.append('text')
+            .attr('class', 'node-body')
+            .attr('text-anchor', 'middle')
+            .attr('dominant-baseline', 'central')
+            .attr('y', 14)
+            .attr('fill', '#94a3b8')
+            .attr('font-size', '12px')
+            .attr('font-family', 'Inter, sans-serif');
+
+        // Click + Dblclick on node
+        nodeEnter.on('click', (event, d) => {
+            event.stopPropagation();
+            this.selectedNodeId = d.id;
+            this._updateSelection();
+            if (this.onNodeClick) this.onNodeClick(d.id);
+        });
+
+        nodeEnter.on('dblclick', (event, d) => {
+            event.stopPropagation();
+            if (this.onNodeDblClick) this.onNodeDblClick(d.id);
+        });
+
+        const allNodes = nodeEnter.merge(nodeGroups);
+
+        // Update positions
+        allNodes.attr('transform', d => `translate(${d.x}, ${d.y})`);
+
+        // Update text content (truncate)
+        allNodes.select('.node-title')
+            .text(d => d.title.length > 22 ? d.title.substring(0, 19) + '…' : d.title);
+
+        allNodes.select('.node-body')
+            .text(d => {
+                const b = d.body || '';
+                return b.length > 25 ? b.substring(0, 22) + '…' : b;
+            });
+
+        this._updateSelection();
+    }
+
+    _edgePath(d, edgeSet) {
+        const sx = typeof d.source === 'object' ? d.source.x : 0;
+        const sy = typeof d.source === 'object' ? d.source.y : 0;
+        const tx = typeof d.target === 'object' ? d.target.x : 0;
+        const ty = typeof d.target === 'object' ? d.target.y : 0;
+
+        const dx = tx - sx;
+        const dy = ty - sy;
+        const dist = Math.sqrt(dx * dx + dy * dy) || 1;
+
+        // Clip start/end to node boundary (approximate with ellipse)
+        const nodeRx = this.nodeWidth / 2 + 4;
+        const nodeRy = this.nodeHeight / 2 + 4;
+
+        const angle = Math.atan2(dy, dx);
+        const startX = sx + Math.cos(angle) * nodeRx;
+        const startY = sy + Math.sin(angle) * nodeRy * 0.6;
+        const endX = tx - Math.cos(angle) * nodeRx;
+        const endY = ty - Math.sin(angle) * nodeRy * 0.6;
+
+        // Check reciprocal
+        const srcId = d.source.id || d.source;
+        const tgtId = d.target.id || d.target;
+        const hasReciprocal = edgeSet.has(`${tgtId}->${srcId}`);
+
+        if (hasReciprocal) {
+            // Curve to the right (from source's perspective)
+            const mx = (startX + endX) / 2;
+            const my = (startY + endY) / 2;
+            const nx = -dy / dist;
+            const ny = dx / dist;
+            const cx = mx + nx * 40;
+            const cy = my + ny * 40;
+            return `M ${startX},${startY} Q ${cx},${cy} ${endX},${endY}`;
         }
-        return null;
+
+        return `M ${startX},${startY} L ${endX},${endY}`;
+    }
+
+    _updateSelection() {
+        this.nodeGroup.selectAll('.node-group').each((d, i, els) => {
+            const g = d3.select(els[i]);
+            const isSelected = d.id === this.selectedNodeId;
+            g.select('.node-rect')
+                .attr('fill', '#1e293b')
+                .attr('stroke', isSelected ? '#6366f1' : '#334155')
+                .attr('stroke-width', isSelected ? 2.5 : 1)
+                .attr('filter', isSelected ? 'url(#glow)' : 'none');
+        });
+    }
+
+    _drag() {
+        const self = this;
+        return d3.drag()
+            .on('start', function (event, d) {
+                if (!event.active) self.layout.simulation.alphaTarget(0.1).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            })
+            .on('drag', function (event, d) {
+                d.fx = event.x;
+                d.fy = event.y;
+            })
+            .on('end', function (event, d) {
+                if (!event.active) self.layout.simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+                if (self.onDragEnd) self.onDragEnd(d.id);
+            });
     }
 
     centerOnNode(id) {
-        const layoutPos = this.layout.positions.get(id);
-        if (!layoutPos) return;
+        const datum = this.layout._nodeMap.get(id);
+        if (!datum) return;
 
-        // We want world coordinates (layoutPos.x, layoutPos.y) to be at screen center
-        // center = (world - center) * scale + center + offset
-        // 0 = (world - center) * scale + offset
-        // offset = -(world - center) * scale
+        const svgNode = this.svg.node();
+        const width = svgNode.clientWidth;
+        const height = svgNode.clientHeight;
 
-        const centerX = this.canvas.width / 2;
-        const centerY = this.canvas.height / 2;
+        const transform = d3.zoomIdentity
+            .translate(width / 2, height / 2)
+            .scale(1)
+            .translate(-datum.x, -datum.y);
 
-        this.offset.x = -(layoutPos.x - centerX) * this.scale;
-        this.offset.y = -(layoutPos.y - centerY) * this.scale;
-
-        this.draw();
+        this.svg.transition().duration(500).call(this.zoom.transform, transform);
     }
 
-    worldToScreen(x, y) {
-        const centerX = this.canvas.width / 2;
-        const centerY = this.canvas.height / 2;
+    // Get screen position of a node (for overlays like inline editing)
+    getNodeScreenPosition(id) {
+        const datum = this.layout._nodeMap.get(id);
+        if (!datum) return null;
 
-        const screenX = (x - centerX) * this.scale + centerX + this.offset.x;
-        const screenY = (y - centerY) * this.scale + centerY + this.offset.y;
+        const svgNode = this.svg.node();
+        const transform = d3.zoomTransform(svgNode);
+        const x = transform.applyX(datum.x);
+        const y = transform.applyY(datum.y);
 
-        return { x: screenX, y: screenY };
+        return { x, y };
     }
 }

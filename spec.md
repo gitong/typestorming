@@ -12,7 +12,7 @@
 **The Solution:** A web app where the **source of truth is a Markdown file** using a human-readable graph notation. The app's job is: 
 (1) **render** the markdown into a visual canvas, and 
 (2) provide an **intuitive editor** to manipulate the markdown without the user needing to type raw syntax. 
-(3) **frictionless capture** the ideation session with visual canvas.
+(3) **frictionlessly capture** the ideation session with visual canvas.
 
 **The Goal:** Markdown in, visual graph out — editable from either side.
 
@@ -116,52 +116,86 @@ The app **reads** the markdown text and **renders** it as a visual node-and-edge
 
 The app provides a **visual interface** so users can build and edit the graph without manually typing the arrow syntax. Every visual action produces valid markdown text.
 
-### Scenario: Creating a new sibling node (Enter)
+### Interaction Modes
 
-**Given** the user is focused on a node A
+The canvas operates in one of three distinct modes. The current mode determines how keyboard shortcuts behave:
+
+1. **Select Mode** (default) — A node is highlighted but not being edited. Arrow keys navigate, `Enter` creates siblings, `Tab` re-parents node as child of previous sibling.
+2. **Edit Mode** — The user is actively typing inside a node (title or body). Text input is captured by the node.
+3. **Edge Label Mode** — The cursor is on a relationship edge, awaiting label input.
+
+### Scenario: Auto-generating NodeID
+
+**When** a new node is created by any mechanism (Enter, Tab, etc.)
+**Then** a unique `NodeID` should be automatically generated (e.g., sequential: `n1`, `n2`, `n3`…)
+**And** the user should never need to manually type or manage NodeIDs
+
+### Scenario: Creating a new sibling node (Enter) — Select Mode
+
+**Given** the user is in **Select Mode** focused on a node A
 **When** the user presses `Enter`
 **Then** a new node declaration `NewNode[#; ]` should be appended to the Nodes section
 **And** it should be created at the same hierarchical level as node A
-**And** the focus should shift to the new node for title input
+**And** the app transitions to **Edit Mode** on the new node for title input
 
-### Scenario: Indenting to a child node (Tab)
+### Scenario: Indenting to a child node (Tab) — Select Mode
 
-**Given** the user is focused on a node B that immediately follows node A
+**Given** the user is in **Select Mode** focused on a node B that immediately follows node A
 **When** the user presses `Tab`
 **Then** node B is indented and becomes a child of node A
 **And** a relationship `A --> B` should be added to the Relationships section
 
-### Scenario: Outdenting to a sibling node (Shift + Tab)
+### Scenario: Outdenting to a sibling node (Shift + Tab) — Select Mode
 
-**Given** the user is focused on a child node B that has a parent node A
+**Given** the user is in **Select Mode** focused on a child node B that has a parent node A
 **When** the user presses `Shift + Tab`
 **Then** node B is outdented to become a sibling of node A
 **And** the relationship in the markdown updates accordingly
 
-### Scenario: Adding a label to a relationship
+### Scenario: Editing node content inline (Space) — Select Mode → Edit Mode
 
-**Given** two nodes A and B are connected by an unlabeled relationship (`A --> B`)
-**When** the user selects the relationship line and types a label
-**Then** the relationship in the markdown should update from `A --> B` to `A -[label]-> B`
-**And** the label should be displayed along the arrow on the canvas
-
-### Scenario: Editing node content inline (Space / Enter)
-
-**Given** the user has selected an existing node
+**Given** the user is in **Select Mode** with a node selected
 **When** the user presses `Space` (or double-clicks)
-**Then** the node enters edit mode for its title
+**Then** the node enters **Edit Mode** **directly within the node itself (no popups or external modals)** for its title
 **When** the user presses `;` or `` ` `` while typing the title
-**Then** the editor shifts to editing the body content of the node
+**Then** the editor shifts to editing the body content of the node inline
 **And** the corresponding `NodeID[#Title; Body]` line in the Nodes section should be updated interactively
 
-### Scenario: Linking an existing related node (Ctrl + Enter)
+### Scenario: Completing a node edit and labeling the relationship — Edit Mode → Edge Label Mode
 
-**Given** the user is currently editing a node (title or body)
+**Given** the user is in **Edit Mode** editing a node (title or body)
+**When** the user presses `Enter` to complete the node editing process
+**Then** the node's content is finalized
+**And** the cursor automatically jumps to the **most recently created** relationship edge connected to this node, entering **Edge Label Mode**
+**And** the user can type to define a relationship label, pressing `Enter` to finalize
+**And** if nothing is typed before pressing `Enter`, it falls back to an unlabeled relationship
+**And** after finalizing, the app returns to **Select Mode**
+
+### Scenario: Canceling edit or edge label (Escape)
+
+**Given** the user is in **Edit Mode** or **Edge Label Mode**
+**When** the user presses `Escape`
+**Then** the current editing action is canceled (reverted to the last saved state)
+**And** the app returns to **Select Mode**
+
+### Scenario: Linking an existing related node (Ctrl + Enter) — Edit Mode
+
+**Given** the user is in **Edit Mode** editing a node (title or body)
 **When** the user presses `Ctrl + Enter`
 **Then** a spotlight search bar appears to find existing nodes
 **When** the user types to find a related node and presses `Enter` to select it
 **Then** the selected node is placed as a related node
 **And** a relationship is seamlessly appended to the markdown
+**And** the app returns to **Select Mode**
+
+### Scenario: Undo and Redo
+
+**When** the user presses `Ctrl + Z`
+**Then** the last action (node creation, edit, indent, relationship change, deletion) is undone
+**And** both the canvas and the markdown revert accordingly
+
+**When** the user presses `Ctrl + Shift + Z` (or `Ctrl + Y`)
+**Then** the last undone action is reapplied
 
 ---
 
@@ -174,16 +208,30 @@ The app provides a **visual interface** so users can build and edit the graph wi
 **Then** the specified <Action> should occur
 **And** the corresponding updates in the Markdown should be applied
 
-**Examples:**
+**Examples (Select Mode):**
 | CurrentNode  | Shortcut       | Action               | Explanation                                  |
 | :----------- | :------------- | :------------------- | :------------------------------------------- |
 | Any Node     | `Enter`        | Create Sibling       | Creates a new node at the same level         |
 | Any Node     | `Tab`          | Indent to Child      | Moves node to be a child of the previous node|
 | Child Node   | `Shift + Tab`  | Outdent to Sibling   | Moves node back to be a sibling              |
-| Any Node     | `Space`        | Edit Node            | Enters edit mode for the current node bounds |
+| Any Node     | `Space`        | Edit Node            | Enters Edit Mode within the node             |
+| Any Node     | `Delete`       | Delete Node          | Removes node and its relationships           |
+| Any Node     | `Escape`       | Deselect             | Clears the current selection                 |
+
+**Examples (Edit Mode):**
+| CurrentNode  | Shortcut       | Action               | Explanation                                  |
+| :----------- | :------------- | :------------------- | :------------------------------------------- |
 | Editing Node | `;` or `` ` `` | Edit Body Content    | Shifts focus from title to body input        |
+| Editing Node | `Enter`        | Finish & Label Edge  | Completes edit, jumps to Edge Label Mode     |
 | Editing Node | `Ctrl + Enter` | Link Existing Node   | Opens spotlight search to find & link a node |
-| Inside Node  | `Shift + Enter`| Insert New Line      | Inserts new line in text editor              |
+| Editing Node | `Shift + Enter`| Insert New Line      | Inserts new line in text editor              |
+| Editing Node | `Escape`       | Cancel Edit          | Reverts changes, returns to Select Mode      |
+
+**Examples (Edge Label Mode):**
+| CurrentNode  | Shortcut       | Action               | Explanation                                  |
+| :----------- | :------------- | :------------------- | :------------------------------------------- |
+| Edge Label   | `Enter`        | Finish Edge Label    | Finalizes the edge (unlabeled if blank)      |
+| Edge Label   | `Escape`       | Cancel Label         | Cancels label entry, returns to Select Mode  |
 
 ### Scenario Outline: Spatial vs. Logical Navigation
 
@@ -216,18 +264,19 @@ The app provides a **visual interface** so users can build and edit the graph wi
 
 ## Feature 4: Quick Search and Linking Bar
 
-### Scenario: Global Quick Search & Jump (Cmd/Ctrl + Space)
+### Scenario: Global Quick Search & Jump (Ctrl + K)
 
-**When** the user presses `Cmd + Space`
+**When** the user presses `Ctrl + K`
 **Then** a quick search bar appears (spotlight style)
 **And** matching a keyword instantly highlights, selects, and jumps to that node
-**And** from the quick search bar, pressing `Tab` creates a new child node
+**And** from the quick search bar, pressing `Tab` creates a new child node **of the matched/selected node**
 **Or** the user can connect the current node to an existing node
 
-### Scenario: Quick Connect (Ctrl + Tab)
 
-**Given** the user is focused on Node A
-**When** the user presses `Ctrl + Tab`
+### Scenario: Quick Connect (Ctrl + Enter from Edit Mode)
+
+**Given** the user is in **Edit Mode** on Node A
+**When** the user presses `Ctrl + Enter`
 **Then** the spotlight quicksearch popup appears specifically to link nodes
 **When** the user searches for and selects Node B
 **Then** a relationship `A --> B` is seamlessly appended in the markdown
@@ -237,10 +286,10 @@ The app provides a **visual interface** so users can build and edit the graph wi
 
 ## Feature 5: Automatic Layout & Organization
 
-### Scenario: Dynamic Auto-layout
+### Scenario: Dynamic Auto-layout (D3.js Force Simulation)
 **Given** the canvas has multiple nodes, edges, or clusters
 **When** a new element is added
-**Then** the system recalculates the layout
+**Then** the system recalculates the layout using D3.js force simulation
 **And** the layout algorithm considers:
 - **Relative distance** or **Fixed distance (opt-in)**
 - Maintaining established distances between elements
@@ -253,7 +302,7 @@ The app provides a **visual interface** so users can build and edit the graph wi
 **And** `Ctrl + Shift + 0` mass-collapses to main roots (`+` increases expansion, `-` collapses further)
 **When** the user zooms out (Gmaps-style)
 **Then** visually less important nodes (with lower headings) fade out
-**And** at high zoom levels, only top tier `#1` Heading nodes remain visible
+**And** at high zoom levels, only top tier `#` (H1) Heading nodes remain visible
 
 ### Scenario: Clustering
 **When** the user groups nodes based on Label or Selection
@@ -264,37 +313,42 @@ The app provides a **visual interface** so users can build and edit the graph wi
 ### Scenario: Bulk Heading Adjustment
 **When** multiple nodes are selected
 **Then** a bulk operation can demote or promote their heading hierarchy, adjusting their visual importance score without changing the core text content
+
 ---
 
 ## Feature 6: Node & Relationship Management
 
-### Scenario: Initiating a relationship between two existing nodes
+### Scenario: Initiating a relationship between two existing nodes (Multi-select)
 
-**Given** the user has selected Node A
-**And** the user has selected Node B (multi-selection)
+**Given** the user is in **Select Mode** and has selected Node A
+**And** the user holds `Shift` and clicks Node B (multi-selection)
 **When** the user presses `Enter`
-**Then** the cursor should be placed on the **label field** of the new relationship
+**Then** the app transitions to **Edge Label Mode** on the new pending connection
 **And** the relationship should be displayed on the canvas as a pending connection
 
 ### Scenario: Confirming an unlabeled relationship
 
-**Given** a pending connection between Node A and Node B
+**Given** the user is in **Edge Label Mode** for a pending connection between Node A and Node B
 **When** the user presses `Enter` without typing any text
 **Then** an unlabeled relationship `A --> B` should be appended to the Relationships section
+**And** the app returns to **Select Mode**
 
 ### Scenario: Confirming a labeled relationship
 
-**Given** a pending connection between Node A and Node B
+**Given** the user is in **Edge Label Mode** for a pending connection between Node A and Node B
 **When** the user types a label and presses `Enter`
 **Then** a labeled relationship `A -[label]-> B` should be appended to the Relationships section
+**And** the app returns to **Select Mode**
 
 ### Scenario: Deleting a node
 
-**Given** the user right-clicks on a node (or presses `Delete`)
-**When** the user confirms deletion
+**Given** the user is in **Select Mode** with a node selected
+**When** the user presses `Delete` (or `Backspace`)
 **Then** the node declaration should be removed from the Nodes section
 **And** all relationships referencing that node should be removed from the Relationships section
+**And** any child nodes of the deleted node should be **re-parented** to the deleted node's parent (or become root-level nodes if no parent exists)
 **And** the canvas should re-render
+**And** `Ctrl + Z` can undo this action
 
 ---
 
@@ -303,14 +357,14 @@ The app provides a **visual interface** so users can build and edit the graph wi
 ### Scenario: Switching to Markdown editor view
 
 **Given** the user is viewing the **Canvas** (default view)
-**When** the user clicks the **view toggle button** (or presses a keyboard shortcut)
+**When** the user clicks the **view toggle button** (or presses `Ctrl + M`)
 **Then** the view should switch to a **Markdown editor** showing the raw graph notation
 **And** the toggle button should indicate the current view mode
 
 ### Scenario: Switching back to Canvas view
 
 **Given** the user is viewing the **Markdown editor**
-**When** the user clicks the **view toggle button** (or presses the same keyboard shortcut)
+**When** the user clicks the **view toggle button** (or presses `Ctrl + M`)
 **Then** the view should switch back to the **Canvas** rendering
 **And** all edits made in the Markdown editor should be reflected on the canvas
 
@@ -331,9 +385,11 @@ The app provides a **visual interface** so users can build and edit the graph wi
 ### Scenario: Copy markdown to clipboard
 
 **Given** the user is in the **Markdown editor** view
-**When** the user clicks the **Copy** button (or presses `Ctrl + C` with no text selected)
+**When** the user clicks the **Copy** button (or presses `Ctrl + Shift + C` with no text selected)
 **Then** the entire markdown content should be copied to the clipboard
 **And** a brief confirmation toast should appear
+
+> **Note:** `Ctrl + Shift + C` is used instead of `Ctrl + C` to avoid overriding the default OS copy behavior when no text is selected.
 
 ### Scenario: Paste markdown from clipboard
 
@@ -367,6 +423,7 @@ The app provides a **visual interface** so users can build and edit the graph wi
 * **Edge Aesthetics:** Simple line, bold, filled bold, dashed, or crossing paths. Arrows can have a "clean infographic" or "natural hand-drawn" style.
 * **Arrow Centering:** Edges aim for the absolute center of the bubble, optionally penetrating slightly inside the border for a natural connection.
 * **Pin Properties:** Anchors position securely against auto-layout changes and prevents hiding during parent collapses.
+* **Node Container Width:** Nodes have a maximum width of approximately 6 words. Text will automatically wrap to the next line if it exceeds this width, ensuring all content remains neatly confined within the node container.
 * **Node Metadata:** Supports custom properties including Labels, Descriptions, Time, Date, and other metrics.
 
 ---
@@ -376,7 +433,7 @@ The app provides a **visual interface** so users can build and edit the graph wi
 1. **Mindmap (Default):** Relative locations with the first node automatically pinned to the center.
 2. **Linear / Block Editor:** Node editor style similar to Obsidian block mode. Links are presented visually inline like `<-[:link:]` or `[:link:]->`, but are always saved in the Markdown Relationships section to preserve the single source of truth.
 3. **Kanban Version:** Card-based rendering akin to Miro planning boards.
-4. **Canvas Mode:** High-level bubbles can be clicked to enter an isolated detail page context.
+4. **Focus Mode:** High-level bubbles can be clicked to enter an isolated detail page context.
 
 ---
 
@@ -388,6 +445,17 @@ The app provides a **visual interface** so users can build and edit the graph wi
 
 ---
 
+## Tech Stack
+
+| Technology | Purpose                                                                 |
+| :--------- | :---------------------------------------------------------------------- |
+| **Vite**   | Dev server and build tooling                                            |
+| **D3.js**  | Canvas rendering, force-directed layout, zoom/pan, and node interaction |
+| **Vanilla JS** | Core application logic — no framework dependency                    |
+| **Vanilla CSS** | Styling — no utility-class framework                               |
+
+---
+
 ## Non-Functional Requirements
 
 | Requirement       | Detail                                                                 |
@@ -396,3 +464,6 @@ The app provides a **visual interface** so users can build and edit the graph wi
 | Storage           | Local-first; file lives on disk or in browser storage                  |
 | Portability       | The `.md` file is self-contained — readable in any text editor         |
 | Real-time sync    | Canvas ↔ Markdown are always in sync; edits in either propagate instantly |
+| Undo/Redo         | Full undo/redo history for all canvas and markdown mutations           |
+| Accessibility     | All core features must be operable via keyboard alone                  |
+| Error handling    | Malformed markdown should degrade gracefully with inline warnings      |

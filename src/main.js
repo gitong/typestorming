@@ -1,15 +1,25 @@
-import { GraphModel } from './graph.js'
-import { ForceLayout } from './layout.js'
-import { Renderer } from './renderer.js'
-import { InputHandler } from './input.js'
+/**
+ * TypeStorming — Main Entry Point (v0.2.1)
+ * Initializes graph, layout, renderer, and input handler.
+ * Manages view toggle, download, copy, and auto-save.
+ */
 
-// Initialize
+import { GraphModel } from './graph.js';
+import { ForceLayout } from './layout.js';
+import { Renderer } from './renderer.js';
+import { InputHandler } from './input.js';
+
+// ───── Initialize Core ─────
 const graph = new GraphModel();
 const layout = new ForceLayout(graph);
-const canvas = document.getElementById('graph-canvas');
-const renderer = new Renderer(canvas, graph, layout);
+layout.init();
 
-// UI Elements
+const canvasContainer = document.getElementById('canvas-container');
+const renderer = new Renderer(canvasContainer, graph, layout);
+
+const inputHandler = new InputHandler(graph, layout, renderer);
+
+// ───── UI Elements ─────
 const viewToggleBtn = document.getElementById('view-toggle');
 const downloadBtn = document.getElementById('download-btn');
 const copyBtn = document.getElementById('copy-btn');
@@ -17,38 +27,40 @@ const editorContainer = document.getElementById('editor-container');
 const markdownEditor = document.getElementById('markdown-editor');
 const toast = document.getElementById('toast');
 
-// Form Elements
-const nodeForm = document.getElementById('node-form');
-const relForm = document.getElementById('rel-form');
-const nodeTitleInput = document.getElementById('node-title-input');
-const nodeBodyInput = document.getElementById('node-body-input');
-const nodeRelInput = document.getElementById('node-rel-input');
-const relLabelInput = document.getElementById('rel-label-input');
-
-// Initialize Input Handler
-const inputHandler = new InputHandler(graph, layout, renderer, {
-  nodeForm, relForm,
-  nodeTitleInput, nodeBodyInput, nodeRelInput, relLabelInput
-});
-
 let isEditorView = false;
 
-// Initial Data
+// ───── Layout tick → re-draw ─────
+layout.onTick = () => renderer.draw();
+
+// ───── Initial Data ─────
 const savedData = localStorage.getItem('typestorming-data');
-if (savedData) {
+const newFormatTest = /^\w+\[#/m;  // Quick test: does it look like the new format?
+
+if (savedData && newFormatTest.test(savedData)) {
   graph.loadMarkdown(savedData);
   markdownEditor.value = savedData;
 } else {
   const initialData = `## Nodes
-Root[title: "Start Here", body: "Press Tab to create a child node"]
+A[#Define the problem; Identify the core pain point and scope]
+B[#Research solutions; Survey existing tools and approaches]
+C[#Prototype v1; Build a quick proof-of-concept]
+D[#Write documentation; Document findings and decisions]
 
 ## Relationships
+A -[leads to]-> B
+A -[leads to]-> C
+B --> C
+C --> B
+B -[opposite]-> D
+D -[return]-> A
 `;
   graph.loadMarkdown(initialData);
   markdownEditor.value = initialData;
 }
 
-// Auto-save on graph changes
+layout.update();
+
+// ───── Auto-save on graph changes ─────
 graph.subscribe(() => {
   const md = graph.getMarkdown();
   localStorage.setItem('typestorming-data', md);
@@ -57,9 +69,7 @@ graph.subscribe(() => {
   }
 });
 
-// Event Listeners
-
-// View Toggle
+// ───── View Toggle (Ctrl+M) ─────
 function toggleView() {
   isEditorView = !isEditorView;
   if (isEditorView) {
@@ -67,8 +77,6 @@ function toggleView() {
     viewToggleBtn.textContent = 'Switch to Canvas (Ctrl+M)';
     downloadBtn.style.display = 'block';
     copyBtn.style.display = 'block';
-
-    // Sync canvas -> editor
     markdownEditor.value = graph.getMarkdown();
     markdownEditor.focus();
   } else {
@@ -76,9 +84,8 @@ function toggleView() {
     viewToggleBtn.textContent = 'Switch to Editor (Ctrl+M)';
     downloadBtn.style.display = 'none';
     copyBtn.style.display = 'none';
-
-    // Sync editor -> canvas
     graph.loadMarkdown(markdownEditor.value);
+    layout.update();
     localStorage.setItem('typestorming-data', markdownEditor.value);
   }
 }
@@ -90,69 +97,54 @@ document.addEventListener('keydown', (e) => {
     e.preventDefault();
     toggleView();
   }
+
+  // Download: Ctrl+S
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    downloadMarkdown();
+  }
+
+  // Copy all: Ctrl+Shift+C (only when no text is selected)
+  if ((e.ctrlKey || e.metaKey) && e.key === 'C' && e.shiftKey) {
+    e.preventDefault();
+    if (!window.getSelection().toString()) {
+      copyToClipboard();
+    }
+  }
 });
 
-// Editor Sync (Live)
+// ───── Editor sync ─────
 markdownEditor.addEventListener('input', () => {
   localStorage.setItem('typestorming-data', markdownEditor.value);
 });
 
-// Download
-downloadBtn.addEventListener('click', () => {
-  const blob = new Blob([markdownEditor.value], { type: 'text/markdown' });
+// ───── Download ─────
+function downloadMarkdown() {
+  const md = graph.getMarkdown();
+  const blob = new Blob([md], { type: 'text/markdown' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = 'storming-session.md';
   a.click();
   URL.revokeObjectURL(url);
-});
+}
 
-// Copy
-copyBtn.addEventListener('click', () => {
-  navigator.clipboard.writeText(markdownEditor.value).then(() => {
+downloadBtn.addEventListener('click', downloadMarkdown);
+
+// ───── Copy ─────
+function copyToClipboard() {
+  const md = graph.getMarkdown();
+  navigator.clipboard.writeText(md).then(() => {
     showToast('Copied to clipboard!');
   });
-});
+}
 
+copyBtn.addEventListener('click', copyToClipboard);
+
+// ───── Toast ─────
 function showToast(msg) {
   toast.textContent = msg;
   toast.classList.add('visible');
-  setTimeout(() => {
-    toast.classList.remove('visible');
-  }, 2000);
+  setTimeout(() => toast.classList.remove('visible'), 2000);
 }
-
-// Mouse Click Selection
-canvas.addEventListener('mousedown', (e) => {
-  if (isEditorView) return;
-  inputHandler.handleMouseDown(e);
-});
-
-// Canvas panning
-let isPanning = false;
-let panStart = { x: 0, y: 0 };
-
-canvas.addEventListener('mousedown', (e) => {
-  if (e.button === 1 || (e.button === 0 && e.altKey)) {
-    isPanning = true;
-    panStart = { x: e.clientX - renderer.offset.x, y: e.clientY - renderer.offset.y };
-    e.preventDefault();
-  }
-});
-
-canvas.addEventListener('mousemove', (e) => {
-  if (isPanning) {
-    renderer.offset.x = e.clientX - panStart.x;
-    renderer.offset.y = e.clientY - panStart.y;
-    renderer.draw();
-  }
-});
-
-canvas.addEventListener('mouseup', () => {
-  isPanning = false;
-});
-
-// Start Layout
-layout.initializePositions();
-layout.start();

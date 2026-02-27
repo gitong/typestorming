@@ -1,173 +1,104 @@
+/**
+ * TypeStorming Layout — D3-Force based simulation
+ */
+
+import * as d3 from 'd3';
 
 export class ForceLayout {
     constructor(graph) {
         this.graph = graph;
-        this.positions = new Map(); // node id -> {x, y, vx, vy, pinned}
-        this.width = 800;
-        this.height = 600;
-        this.animationId = null;
+        this.simulation = null;
+        this.nodeData = [];
+        this.linkData = [];
+        this.onTick = null;
 
-        // Physics constants -- adjusted for wider spacing
-        this.repulsion = 50000;  // Greatly increased to push non-connected nodes apart
-        this.springLength = 350; // Increased length for connections
-        this.springStrength = 0.05; // Slightly weaker springs to allow repulsion to win
-        this.damping = 0.9;
-        this.centerPull = 0.01;
-
-        // Subscribe to graph changes to re-warm simulation
-        this.graph.subscribe(() => {
-            this.initializePositions();
-            this.start();
-        });
+        this._nodeMap = new Map(); // id -> node datum (for fx/fy pinning)
     }
 
-    initializePositions() {
-        // Initialize new nodes with random positions near center
+    init() {
+        this.simulation = d3.forceSimulation()
+            .force('charge', d3.forceManyBody().strength(-800))
+            .force('link', d3.forceLink().id(d => d.id).distance(200).strength(0.3))
+            .force('center', d3.forceCenter(0, 0))
+            .force('collide', d3.forceCollide().radius(100))
+            .alphaDecay(0.02)
+            .on('tick', () => {
+                if (this.onTick) this.onTick();
+            });
+
+        this.simulation.stop();
+    }
+
+    update() {
+        // Build node data — preserve existing positions
+        const existingPositions = new Map();
+        for (const nd of this.nodeData) {
+            existingPositions.set(nd.id, { x: nd.x, y: nd.y, vx: nd.vx, vy: nd.vy, fx: nd.fx, fy: nd.fy });
+        }
+
+        this.nodeData = [];
+        this._nodeMap.clear();
+
         for (const [id, node] of this.graph.nodes) {
-            if (!this.positions.has(id)) {
-                this.positions.set(id, {
-                    x: this.width / 2 + (Math.random() - 0.5) * 200,
-                    y: this.height / 2 + (Math.random() - 0.5) * 200,
-                    vx: 0,
-                    vy: 0,
-                    pinned: false
+            const existing = existingPositions.get(id);
+            const datum = {
+                id,
+                title: node.title,
+                body: node.body,
+                level: node.level || 1,
+                x: existing ? existing.x : (Math.random() - 0.5) * 300,
+                y: existing ? existing.y : (Math.random() - 0.5) * 300,
+                vx: existing ? existing.vx : 0,
+                vy: existing ? existing.vy : 0,
+                fx: existing ? existing.fx : null,
+                fy: existing ? existing.fy : null,
+            };
+            this.nodeData.push(datum);
+            this._nodeMap.set(id, datum);
+        }
+
+        // Build link data
+        this.linkData = [];
+        for (const edge of this.graph.edges) {
+            if (this._nodeMap.has(edge.from) && this._nodeMap.has(edge.to)) {
+                this.linkData.push({
+                    source: edge.from,
+                    target: edge.to,
+                    label: edge.label || '',
                 });
             }
         }
 
-        // Remove deleted nodes
-        for (const id of this.positions.keys()) {
-            if (!this.graph.nodes.has(id)) {
-                this.positions.delete(id);
-            }
-        }
-    }
+        // Update simulation
+        this.simulation.nodes(this.nodeData);
+        this.simulation.force('link').links(this.linkData);
 
-    setSize(width, height) {
-        this.width = width;
-        this.height = height;
+        // Reheat
+        this.simulation.alpha(0.3).restart();
     }
 
     pinNode(id, x, y) {
-        if (this.positions.has(id)) {
-            const pos = this.positions.get(id);
-            pos.x = x;
-            pos.y = y;
-            pos.pinned = true;
-            pos.vx = 0;
-            pos.vy = 0;
-            this.start(); // Wake up simulation
+        const datum = this._nodeMap.get(id);
+        if (datum) {
+            datum.fx = x;
+            datum.fy = y;
         }
     }
 
     unpinNode(id) {
-        if (this.positions.has(id)) {
-            this.positions.get(id).pinned = false;
-            this.start();
+        const datum = this._nodeMap.get(id);
+        if (datum) {
+            datum.fx = null;
+            datum.fy = null;
         }
     }
 
-    start() {
-        if (!this.animationId) {
-            this.tick();
-        }
+    getNodePosition(id) {
+        const datum = this._nodeMap.get(id);
+        return datum ? { x: datum.x, y: datum.y } : null;
     }
 
     stop() {
-        if (this.animationId) {
-            cancelAnimationFrame(this.animationId);
-            this.animationId = null;
-        }
-    }
-
-    tick() {
-        // Calculate forces
-        const forces = new Map();
-        for (const id of this.positions.keys()) {
-            forces.set(id, { fx: 0, fy: 0 });
-        }
-
-        const nodes = Array.from(this.positions.keys());
-
-        // Repulsion (Coulomb's Law-ish)
-        for (let i = 0; i < nodes.length; i++) {
-            for (let j = i + 1; j < nodes.length; j++) {
-                const u = nodes[i];
-                const v = nodes[j];
-                const posU = this.positions.get(u);
-                const posV = this.positions.get(v);
-
-                let dx = posU.x - posV.x;
-                let dy = posU.y - posV.y;
-                let distSq = dx * dx + dy * dy || 1;
-                let dist = Math.sqrt(distSq);
-
-                const force = this.repulsion / distSq;
-                const fx = (dx / dist) * force;
-                const fy = (dy / dist) * force;
-
-                forces.get(u).fx += fx;
-                forces.get(u).fy += fy;
-                forces.get(v).fx -= fx;
-                forces.get(v).fy -= fy;
-            }
-        }
-
-        // Attraction (Springs)
-        for (const edge of this.graph.edges) {
-            if (!this.positions.has(edge.from) || !this.positions.has(edge.to)) continue;
-
-            const u = edge.from;
-            const v = edge.to;
-            const posU = this.positions.get(u);
-            const posV = this.positions.get(v);
-
-            let dx = posU.x - posV.x;
-            let dy = posU.y - posV.y;
-            let dist = Math.sqrt(dx * dx + dy * dy) || 1;
-
-            const force = (dist - this.springLength) * this.springStrength;
-            const fx = (dx / dist) * force;
-            const fy = (dy / dist) * force;
-
-            forces.get(u).fx -= fx;
-            forces.get(u).fy -= fy;
-            forces.get(v).fx += fx;
-            forces.get(v).fy += fy;
-        }
-
-        // Center gravity (pull to center)
-        const cx = this.width / 2;
-        const cy = this.height / 2;
-        for (const id of nodes) {
-            const pos = this.positions.get(id);
-            forces.get(id).fx -= (pos.x - cx) * this.centerPull;
-            forces.get(id).fy -= (pos.y - cy) * this.centerPull;
-        }
-
-        // Apply forces and update positions
-        let totalV = 0;
-        for (const id of nodes) {
-            const pos = this.positions.get(id);
-            const force = forces.get(id);
-
-            if (!pos.pinned) {
-                pos.vx = (pos.vx + force.fx) * this.damping;
-                pos.vy = (pos.vy + force.fy) * this.damping;
-                pos.x += pos.vx;
-                pos.y += pos.vy;
-                totalV += Math.abs(pos.vx) + Math.abs(pos.vy);
-            }
-        }
-
-        // Stop loop if system is stable
-        if (totalV < 0.5) {
-            this.animationId = null;
-            // Notify renderer final draw
-            if (this.onTick) this.onTick();
-        } else {
-            if (this.onTick) this.onTick();
-            this.animationId = requestAnimationFrame(() => this.tick());
-        }
+        if (this.simulation) this.simulation.stop();
     }
 }

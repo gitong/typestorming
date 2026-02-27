@@ -1,128 +1,611 @@
+/**
+ * TypeStorming Input Handler
+ * 3-mode state machine: SELECT, EDIT, EDGE_LABEL
+ * Handles all keyboard shortcuts & mouse interactions per spec.
+ */
 
 export class InputHandler {
-    constructor(graph, layout, renderer, uiElements) {
+    constructor(graph, layout, renderer) {
         this.graph = graph;
         this.layout = layout;
         this.renderer = renderer;
-        this.ui = uiElements; // { nodeForm, titleInput, ... }
 
-        this.state = 'IDLE'; // IDLE, CREATING_NODE, EDITING_NODE, EDITING_REL, SPOTLIGHT
-        this.creationStep = null; // 'TITLE', 'BODY', 'REL'
-        this.activeNodeId = null; // Node being edited/created
-        this.sourceNodeId = null; // Origin node for creation
-        this.tempEdge = null; // For visualization
+        // State machine
+        this.mode = 'SELECT'; // SELECT | EDIT | EDGE_LABEL
+        this.editingNodeId = null;
+        this.editField = 'title'; // 'title' or 'body'
+        this.preEditState = null; // for cancel/revert
+        this.pendingEdge = null; // { from, to } for edge label mode
 
-        this.setupEvents();
+        // Inline editing overlay
+        this.editOverlay = null;
+        this.editInput = null;
+
+        // Spotlight
+        this.spotlightOpen = false;
+        this.spotlightMode = 'search'; // 'search' | 'link'
+        this.spotlightLinkSource = null; // node id when linking
+        this.searchResults = [];
+        this.searchSelectionIndex = 0;
+
+        this._setupEvents();
     }
 
-    setupEvents() {
-        // Global Keydown (Spotlight & Editor Toggle handled in main, but Spotlight hotkey here)
-        window.addEventListener('keydown', (e) => this.handleKey(e));
+    _setupEvents() {
+        document.addEventListener('keydown', (e) => this._handleGlobalKey(e));
 
-        // Form Inputs
-        this.ui.nodeTitleInput.addEventListener('keydown', (e) => this.handleFormKey(e, 'TITLE'));
-        this.ui.nodeBodyInput.addEventListener('keydown', (e) => this.handleFormKey(e, 'BODY'));
-        this.ui.nodeRelInput.addEventListener('keydown', (e) => this.handleFormKey(e, 'REL'));
+        // Renderer callbacks
+        this.renderer.onNodeClick = (id) => this._onNodeClick(id);
+        this.renderer.onNodeDblClick = (id) => this._onNodeDblClick(id);
+        this.renderer.onBackgroundClick = () => this._onBackgroundClick();
 
-        // Mouse Dragging (Global)
-        window.addEventListener('mousemove', (e) => this.handleMouseMove(e));
-        window.addEventListener('mouseup', (e) => this.handleMouseUp(e));
-
-        // Spotlight Inputs
+        // Spotlight
         const spotlightInput = document.getElementById('spotlight-input');
         if (spotlightInput) {
-            spotlightInput.addEventListener('input', (e) => this.handleSearchInput(e));
-            spotlightInput.addEventListener('keydown', (e) => this.handleSearchKey(e));
+            spotlightInput.addEventListener('input', (e) => this._handleSearchInput(e));
+            spotlightInput.addEventListener('keydown', (e) => this._handleSearchKey(e));
         }
     }
 
-    handleKey(e) {
-        // Spotlight Toggle
-        if (e.key === '/' && this.state === 'IDLE') {
-            // Prevent capturing '/' if typing in other inputs (handled by next check theoretically, but '/')
-            if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') return;
+    // ========================================
+    // GLOBAL KEY HANDLER
+    // ========================================
 
+    _handleGlobalKey(e) {
+        // Ignore keys when in markdown editor textarea
+        if (e.target.id === 'markdown-editor') return;
+
+        // Spotlight toggle (Ctrl+K)
+        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
             e.preventDefault();
-            this.toggleSearch();
+            this._toggleSpotlight('search');
             return;
         }
 
-        if (this.state === 'SPOTLIGHT') {
-            if (e.key === 'Escape') {
-                this.toggleSearch();
+        // Undo / Redo
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
+            e.preventDefault();
+            this.graph.undo();
+            this.layout.update();
+            return;
+        }
+        if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+            // Ctrl+Shift+Z specifically: if e.key === 'Z' with shift, it may be capital
+            if (e.key === 'y' || e.shiftKey) {
+                e.preventDefault();
+                this.graph.redo();
+                this.layout.update();
+                return;
             }
+        }
+
+        if (this.spotlightOpen) {
+            // Let spotlight handle its own keys
             return;
         }
 
-        if (this.state !== 'IDLE') return; // Let form handle keys if active
+        // If inline editing overlay is active, handle edit keys
+        if (this.mode === 'EDIT') {
+            this._handleEditKey(e);
+            return;
+        }
 
-        // Ignore if typing in editor or other inputs
-        if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
+        if (this.mode === 'EDGE_LABEL') {
+            this._handleEdgeLabelKey(e);
+            return;
+        }
 
+        // SELECT mode
+        this._handleSelectKey(e);
+    }
+
+    // ========================================
+    // SELECT MODE
+    // ========================================
+
+    _handleSelectKey(e) {
         const selectedId = this.renderer.selectedNodeId;
-        // ... rest of handleKey logic ...
-        // (Use previous logic below this line)
-        if (e.key === 'Tab') {
+
+        // Enter: create sibling
+        if (e.key === 'Enter' && !e.ctrlKey && !e.shiftKey) {
             e.preventDefault();
             if (selectedId) {
-                if (e.shiftKey) {
-                    this.startNodeCreation(selectedId, 'SIBLING');
-                } else {
-                    this.startNodeCreation(selectedId, 'CHILD');
-                }
+                this._createSibling(selectedId);
+            } else {
+                this._createRootNode();
             }
-        } else if (e.key === 'Enter' && e.ctrlKey) {
-            e.preventDefault();
-            this.startNodeCreation(null, 'INDEPENDENT');
-        } else if (e.key === 'Enter' && e.shiftKey) {
-            e.preventDefault();
-            if (selectedId) {
-                this.startEdit(selectedId);
-            }
+            return;
         }
 
-        // Navigation
-        if (e.key.startsWith('Arrow')) {
+        // Tab: indent to child (of previous sibling)
+        if (e.key === 'Tab' && !e.shiftKey) {
             e.preventDefault();
-            const direction = e.key.replace('Arrow', '').toUpperCase();
             if (selectedId) {
-                if (e.shiftKey) {
-                    this.navigateLogical(selectedId, direction);
-                } else if (e.altKey) {
-                    // strict relationship navigation (todo)
-                } else {
-                    this.navigateSpatial(selectedId, direction);
-                }
+                this._indentToChild(selectedId);
             }
+            return;
         }
 
-        // Deletion
-        if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Shift+Tab: outdent to sibling
+        if (e.key === 'Tab' && e.shiftKey) {
+            e.preventDefault();
             if (selectedId) {
-                this.graph.removeNode(selectedId);
-                this.renderer.selectedNodeId = null;
+                this._outdentToSibling(selectedId);
             }
+            return;
+        }
+
+        // Space: enter edit mode
+        if (e.key === ' ' && selectedId) {
+            e.preventDefault();
+            this._startEdit(selectedId);
+            return;
+        }
+
+        // Delete / Backspace: delete node
+        if ((e.key === 'Delete' || e.key === 'Backspace') && selectedId) {
+            e.preventDefault();
+            this._deleteNode(selectedId);
+            return;
+        }
+
+        // Escape: deselect
+        if (e.key === 'Escape') {
+            this.renderer.selectedNodeId = null;
+            this.renderer._updateSelection();
+            return;
+        }
+
+        // Arrow keys: spatial navigation
+        if (e.key.startsWith('Arrow') && selectedId) {
+            e.preventDefault();
+            const dir = e.key.replace('Arrow', '').toUpperCase();
+            if (e.shiftKey) {
+                this._navigateLogical(selectedId, dir);
+            } else {
+                this._navigateSpatial(selectedId, dir);
+            }
+            return;
         }
     }
 
-    toggleSearch() {
+    // ========================================
+    // EDIT MODE (inline)
+    // ========================================
+
+    _startEdit(nodeId) {
+        const node = this.graph.nodes.get(nodeId);
+        if (!node) return;
+
+        this.mode = 'EDIT';
+        this.editingNodeId = nodeId;
+        this.editField = 'title';
+        this.preEditState = { title: node.title, body: node.body };
+
+        this._showEditOverlay(nodeId, node.title);
+    }
+
+    _showEditOverlay(nodeId, initialValue) {
+        this._removeEditOverlay();
+
+        const pos = this.renderer.getNodeScreenPosition(nodeId);
+        if (!pos) return;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'inline-edit-overlay';
+        overlay.style.cssText = `
+      position: absolute;
+      left: ${pos.x - 80}px;
+      top: ${pos.y - 16}px;
+      z-index: 50;
+      pointer-events: auto;
+    `;
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.id = 'inline-edit-input';
+        input.value = initialValue || '';
+        input.placeholder = this.editField === 'title' ? 'Title…' : 'Body…';
+        input.style.cssText = `
+      width: 160px;
+      padding: 6px 10px;
+      background: #1e293b;
+      border: 2px solid #6366f1;
+      border-radius: 6px;
+      color: #f8fafc;
+      font-family: Inter, sans-serif;
+      font-size: ${this.editField === 'title' ? '14px' : '12px'};
+      font-weight: ${this.editField === 'title' ? 'bold' : 'normal'};
+      outline: none;
+      text-align: center;
+    `;
+
+        input.addEventListener('keydown', (e) => this._handleEditKey(e));
+
+        overlay.appendChild(input);
+        document.getElementById('canvas-container').appendChild(overlay);
+
+        this.editOverlay = overlay;
+        this.editInput = input;
+
+        // Focus and select
+        requestAnimationFrame(() => {
+            input.focus();
+            input.select();
+        });
+    }
+
+    _removeEditOverlay() {
+        if (this.editOverlay && this.editOverlay.parentNode) {
+            this.editOverlay.parentNode.removeChild(this.editOverlay);
+        }
+        this.editOverlay = null;
+        this.editInput = null;
+    }
+
+    _handleEditKey(e) {
+        // Prevent global handler from re-processing
+        if (e.target !== this.editInput) return;
+
+        // Semicolon or backtick: switch from title to body
+        if ((e.key === ';' || e.key === '`') && this.editField === 'title') {
+            e.preventDefault();
+            // Save title, switch to body
+            const node = this.graph.nodes.get(this.editingNodeId);
+            if (node) {
+                this.graph.updateNode(this.editingNodeId, { title: this.editInput.value });
+            }
+            this.editField = 'body';
+            this.editInput.value = node ? node.body : '';
+            this.editInput.placeholder = 'Body…';
+            this.editInput.style.fontWeight = 'normal';
+            this.editInput.style.fontSize = '12px';
+            this.editInput.select();
+            return;
+        }
+
+        // Ctrl+Enter: open spotlight to link existing node
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            this._finishEditSave();
+            this._toggleSpotlight('link');
+            return;
+        }
+
+        // Enter: finalize edit, jump to edge label mode
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            this._finishEditAndLabelEdge();
+            return;
+        }
+
+        // Shift+Enter: insert newline (for body — but since it's an input, we'll just ignore)
+        if (e.key === 'Enter' && e.shiftKey) {
+            // For inline single-line input, no-op
+            return;
+        }
+
+        // Escape: cancel edit
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            this._cancelEdit();
+            return;
+        }
+
+        // Stop propagation so select mode doesn't catch these
+        e.stopPropagation();
+    }
+
+    _finishEditSave() {
+        if (!this.editingNodeId) return;
+        const node = this.graph.nodes.get(this.editingNodeId);
+        if (node && this.editInput) {
+            const data = {};
+            if (this.editField === 'title') {
+                data.title = this.editInput.value || 'Untitled';
+            } else {
+                data.body = this.editInput.value || '';
+            }
+            this.graph.updateNode(this.editingNodeId, data);
+        }
+        this.layout.update();
+    }
+
+    _finishEditAndLabelEdge() {
+        this._finishEditSave();
+
+        // Find the most recently created edge connected to this node
+        const id = this.editingNodeId;
+        const edges = this.graph.edges;
+        let lastEdge = null;
+        for (let i = edges.length - 1; i >= 0; i--) {
+            if (edges[i].from === id || edges[i].to === id) {
+                lastEdge = edges[i];
+                break;
+            }
+        }
+
+        this._removeEditOverlay();
+
+        if (lastEdge) {
+            // Enter Edge Label Mode
+            this.pendingEdge = lastEdge;
+            this.mode = 'EDGE_LABEL';
+            this._showEdgeLabelOverlay(lastEdge);
+        } else {
+            // No edge to label — return to select
+            this.mode = 'SELECT';
+            this.editingNodeId = null;
+        }
+    }
+
+    _cancelEdit() {
+        // Revert to pre-edit state
+        if (this.editingNodeId && this.preEditState) {
+            this.graph.updateNode(this.editingNodeId, this.preEditState);
+            this.layout.update();
+        }
+        this._removeEditOverlay();
+        this.mode = 'SELECT';
+        this.editingNodeId = null;
+        this.preEditState = null;
+    }
+
+    // ========================================
+    // EDGE LABEL MODE
+    // ========================================
+
+    _showEdgeLabelOverlay(edge) {
+        this._removeEditOverlay();
+
+        // Position between the two nodes
+        const p1 = this.renderer.getNodeScreenPosition(edge.from);
+        const p2 = this.renderer.getNodeScreenPosition(edge.to);
+        if (!p1 || !p2) {
+            this.mode = 'SELECT';
+            return;
+        }
+
+        const mx = (p1.x + p2.x) / 2;
+        const my = (p1.y + p2.y) / 2;
+
+        const overlay = document.createElement('div');
+        overlay.id = 'inline-edit-overlay';
+        overlay.style.cssText = `
+      position: absolute;
+      left: ${mx - 80}px;
+      top: ${my - 16}px;
+      z-index: 50;
+      pointer-events: auto;
+    `;
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.id = 'edge-label-input';
+        input.value = edge.label || '';
+        input.placeholder = 'Relationship label (optional)…';
+        input.style.cssText = `
+      width: 200px;
+      padding: 6px 10px;
+      background: #1e293b;
+      border: 2px solid #818cf8;
+      border-radius: 6px;
+      color: #c4b5fd;
+      font-family: Inter, sans-serif;
+      font-size: 12px;
+      font-style: italic;
+      outline: none;
+      text-align: center;
+    `;
+
+        input.addEventListener('keydown', (e) => this._handleEdgeLabelKey(e));
+
+        overlay.appendChild(input);
+        document.getElementById('canvas-container').appendChild(overlay);
+
+        this.editOverlay = overlay;
+        this.editInput = input;
+
+        requestAnimationFrame(() => {
+            input.focus();
+            input.select();
+        });
+    }
+
+    _handleEdgeLabelKey(e) {
+        if (e.target !== this.editInput) return;
+
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            const label = this.editInput.value || '';
+            if (this.pendingEdge) {
+                this.graph.updateEdgeLabel(this.pendingEdge.from, this.pendingEdge.to, label);
+                this.layout.update();
+            }
+            this._removeEditOverlay();
+            this.mode = 'SELECT';
+            this.editingNodeId = null;
+            this.pendingEdge = null;
+            return;
+        }
+
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            this._removeEditOverlay();
+            this.mode = 'SELECT';
+            this.editingNodeId = null;
+            this.pendingEdge = null;
+            return;
+        }
+
+        e.stopPropagation();
+    }
+
+    // ========================================
+    // NODE CREATION
+    // ========================================
+
+    _createRootNode() {
+        const id = this.graph.generateId();
+        this.graph.addNode({ id, title: '', body: '', level: 1 });
+        this.layout.update();
+        this.renderer.selectedNodeId = id;
+        this.renderer._updateSelection();
+
+        // Enter edit mode
+        setTimeout(() => this._startEdit(id), 100);
+    }
+
+    _createSibling(selectedId) {
+        const parent = this.graph.getParent(selectedId);
+        const newId = this.graph.generateId();
+        this.graph.addNode({ id: newId, title: '', body: '', level: 1 });
+
+        if (parent) {
+            this.graph.addEdge({ from: parent.id, to: newId, label: '' });
+        }
+
+        this.layout.update();
+        this.renderer.selectedNodeId = newId;
+        this.renderer._updateSelection();
+
+        setTimeout(() => this._startEdit(newId), 100);
+    }
+
+    _indentToChild(nodeId) {
+        // Make nodeId a child of the previous sibling
+        const prevSibling = this.graph.getPrevSibling(nodeId);
+        if (!prevSibling) return;
+
+        const parent = this.graph.getParent(nodeId);
+        if (parent) {
+            this.graph.removeEdge(parent.id, nodeId);
+        }
+        this.graph.addEdge({ from: prevSibling.id, to: nodeId, label: '' });
+        this.layout.update();
+    }
+
+    _outdentToSibling(nodeId) {
+        const parent = this.graph.getParent(nodeId);
+        if (!parent) return;
+
+        const grandparent = this.graph.getParent(parent.id);
+        // Remove edge from parent -> node
+        this.graph.removeEdge(parent.id, nodeId);
+
+        if (grandparent) {
+            this.graph.addEdge({ from: grandparent.id, to: nodeId, label: '' });
+        }
+        this.layout.update();
+    }
+
+    _deleteNode(nodeId) {
+        this.graph.removeNode(nodeId);
+        this.renderer.selectedNodeId = null;
+        this.renderer._updateSelection();
+        this.layout.update();
+    }
+
+    // ========================================
+    // NAVIGATION
+    // ========================================
+
+    _navigateSpatial(currentId, direction) {
+        const currentPos = this.layout.getNodePosition(currentId);
+        if (!currentPos) return;
+
+        let bestId = null;
+        let minDist = Infinity;
+
+        for (const [id, node] of this.graph.nodes) {
+            if (id === currentId) continue;
+            const pos = this.layout.getNodePosition(id);
+            if (!pos) continue;
+
+            const dx = pos.x - currentPos.x;
+            const dy = pos.y - currentPos.y;
+
+            let valid = false;
+            if (direction === 'RIGHT' && dx > 0 && Math.abs(dy) < dx * 2) valid = true;
+            if (direction === 'LEFT' && dx < 0 && Math.abs(dy) < -dx * 2) valid = true;
+            if (direction === 'DOWN' && dy > 0 && Math.abs(dx) < dy * 2) valid = true;
+            if (direction === 'UP' && dy < 0 && Math.abs(dx) < -dy * 2) valid = true;
+
+            if (valid) {
+                const dist = dx * dx + dy * dy;
+                if (dist < minDist) {
+                    minDist = dist;
+                    bestId = id;
+                }
+            }
+        }
+
+        if (bestId) {
+            this.renderer.selectedNodeId = bestId;
+            this.renderer._updateSelection();
+            this.renderer.draw();
+        }
+    }
+
+    _navigateLogical(currentId, direction) {
+        let targetId = null;
+
+        if (direction === 'UP') {
+            const parent = this.graph.getParent(currentId);
+            if (parent) targetId = parent.id;
+        } else if (direction === 'DOWN') {
+            const children = this.graph.getChildren(currentId);
+            if (children.length > 0) targetId = children[0].id;
+        } else if (direction === 'RIGHT') {
+            const next = this.graph.getNextSibling(currentId);
+            if (next) targetId = next.id;
+        } else if (direction === 'LEFT') {
+            const prev = this.graph.getPrevSibling(currentId);
+            if (prev) targetId = prev.id;
+        }
+
+        if (targetId) {
+            this.renderer.selectedNodeId = targetId;
+            this.renderer._updateSelection();
+            this.renderer.draw();
+        }
+    }
+
+    // ========================================
+    // SPOTLIGHT SEARCH
+    // ========================================
+
+    _toggleSpotlight(mode = 'search') {
         const overlay = document.getElementById('spotlight-overlay');
         const input = document.getElementById('spotlight-input');
 
-        if (this.state === 'SPOTLIGHT') {
-            this.state = 'IDLE';
+        if (this.spotlightOpen) {
+            this.spotlightOpen = false;
+            this.spotlightMode = 'search';
             overlay.style.display = 'none';
-            this.renderer.canvas.focus();
-        } else {
-            this.state = 'SPOTLIGHT';
-            overlay.style.display = 'flex';
-            input.value = '';
-            input.focus();
-            this.handleSearchInput({ target: input }); // clear results
+            this.spotlightLinkSource = null;
+            return;
         }
+
+        this.spotlightOpen = true;
+        this.spotlightMode = mode;
+        if (mode === 'link') {
+            this.spotlightLinkSource = this.editingNodeId;
+            // Finish current edit mode save before opening spotlight
+            if (this.mode === 'EDIT') {
+                this._finishEditSave();
+                this._removeEditOverlay();
+            }
+        }
+
+        overlay.style.display = 'flex';
+        input.value = '';
+        input.placeholder = mode === 'link' ? 'Link to node…' : 'Search nodes…';
+        input.focus();
+        this._clearSearchResults();
     }
 
-    handleSearchInput(e) {
+    _handleSearchInput(e) {
         const query = e.target.value.toLowerCase();
         const resultsList = document.getElementById('spotlight-results');
         resultsList.innerHTML = '';
@@ -132,49 +615,84 @@ export class InputHandler {
 
         if (!query) return;
 
-        // Filter nodes
         for (const [id, node] of this.graph.nodes) {
             if (node.title.toLowerCase().includes(query) || node.body.toLowerCase().includes(query)) {
                 this.searchResults.push(node);
             }
         }
-
-        // Limit results
         this.searchResults = this.searchResults.slice(0, 10);
 
-        // Render
         this.searchResults.forEach((node, index) => {
             const li = document.createElement('li');
             li.className = 'spotlight-item';
             if (index === 0) li.classList.add('selected');
-
             li.innerHTML = `
-                <span class="spotlight-item-title">${node.title}</span>
-                <span class="spotlight-item-body">${node.body}</span>
-            `;
-            li.addEventListener('click', () => this.selectSearchResult(node));
+        <span class="spotlight-item-title">${node.title || node.id}</span>
+        <span class="spotlight-item-body">${node.body || ''}</span>
+      `;
+            li.addEventListener('click', () => this._selectSearchResult(node));
             resultsList.appendChild(li);
         });
     }
 
-    handleSearchKey(e) {
+    _handleSearchKey(e) {
+        if (e.key === 'Escape') {
+            e.preventDefault();
+            this._toggleSpotlight();
+            this.mode = 'SELECT';
+            return;
+        }
+
         if (e.key === 'ArrowDown') {
             e.preventDefault();
             this.searchSelectionIndex = Math.min(this.searchResults.length - 1, this.searchSelectionIndex + 1);
-            this.updateSearchSelection();
+            this._updateSearchSelection();
         } else if (e.key === 'ArrowUp') {
             e.preventDefault();
             this.searchSelectionIndex = Math.max(0, this.searchSelectionIndex - 1);
-            this.updateSearchSelection();
+            this._updateSearchSelection();
         } else if (e.key === 'Enter') {
             e.preventDefault();
             if (this.searchResults[this.searchSelectionIndex]) {
-                this.selectSearchResult(this.searchResults[this.searchSelectionIndex]);
+                this._selectSearchResult(this.searchResults[this.searchSelectionIndex]);
+            }
+        } else if (e.key === 'Tab' && this.spotlightMode === 'search') {
+            // Tab from search: create child of matched node
+            e.preventDefault();
+            if (this.searchResults[this.searchSelectionIndex]) {
+                const parentNode = this.searchResults[this.searchSelectionIndex];
+                this._toggleSpotlight();
+                const newId = this.graph.generateId();
+                this.graph.addNode({ id: newId, title: '', body: '', level: 1 });
+                this.graph.addEdge({ from: parentNode.id, to: newId, label: '' });
+                this.layout.update();
+                this.renderer.selectedNodeId = newId;
+                this.renderer._updateSelection();
+                setTimeout(() => this._startEdit(newId), 100);
             }
         }
     }
 
-    updateSearchSelection() {
+    _selectSearchResult(node) {
+        if (this.spotlightMode === 'link' && this.spotlightLinkSource) {
+            // Link mode: create edge from source to selected
+            this.graph.addEdge({ from: this.spotlightLinkSource, to: node.id, label: '' });
+            this.layout.update();
+            this._toggleSpotlight();
+            this.mode = 'SELECT';
+            this.editingNodeId = null;
+            this.spotlightLinkSource = null;
+        } else {
+            // Search mode: jump to node
+            this._toggleSpotlight();
+            this.renderer.selectedNodeId = node.id;
+            this.renderer._updateSelection();
+            this.renderer.centerOnNode(node.id);
+            this.mode = 'SELECT';
+        }
+    }
+
+    _updateSearchSelection() {
         const items = document.querySelectorAll('.spotlight-item');
         items.forEach((item, idx) => {
             if (idx === this.searchSelectionIndex) item.classList.add('selected');
@@ -182,292 +700,32 @@ export class InputHandler {
         });
     }
 
-    selectSearchResult(node) {
-        this.toggleSearch(); // close
-        this.renderer.selectedNodeId = node.id;
-        this.renderer.centerOnNode(node.id);
+    _clearSearchResults() {
+        const resultsList = document.getElementById('spotlight-results');
+        if (resultsList) resultsList.innerHTML = '';
+        this.searchResults = [];
+        this.searchSelectionIndex = 0;
     }
 
-    startNodeCreation(originId, type) {
-        this.state = 'CREATING_NODE';
-        this.sourceNodeId = originId;
-        this.creationType = type;
+    // ========================================
+    // MOUSE CALLBACKS
+    // ========================================
 
-        // Determine position for new node
-        let x = 0, y = 0;
-        if (originId) {
-            const pos = this.layout.positions.get(originId);
-            // Offset based on type
-            if (type === 'CHILD') {
-                x = pos.x + 300;
-                y = pos.y + 50 * (Math.random() - 0.5);
-            } else if (type === 'SIBLING') {
-                x = pos.x;
-                y = pos.y + 150;
-            }
-        } else {
-            // Center of screen
-            x = this.renderer.canvas.width / 2 - this.renderer.offset.x;
-            y = this.renderer.canvas.height / 2 - this.renderer.offset.y;
-        }
-
-        // Create temp node ID
-        const newId = 'Node_' + Date.now();
-        this.activeNodeId = newId;
-
-        // Show Form
-        this.showNodeForm(x, y);
-
-        this.creationStep = 'TITLE';
-        this.ui.nodeTitleInput.value = '';
-        this.ui.nodeBodyInput.value = '';
-        this.ui.nodeRelInput.value = '';
-        this.ui.nodeTitleInput.focus();
-    }
-
-    startEdit(nodeId) {
-        this.state = 'EDITING_NODE';
-        this.activeNodeId = nodeId;
-        const node = this.graph.nodes.get(nodeId);
-        const pos = this.layout.positions.get(nodeId);
-
-        this.showNodeForm(pos.x, pos.y);
-        this.ui.nodeTitleInput.value = node.title;
-        this.ui.nodeBodyInput.value = node.body;
-        this.ui.nodeRelInput.style.display = 'none'; // Hide relationship input for simple edit
-
-        this.creationStep = 'TITLE';
-        this.ui.nodeTitleInput.focus();
-        this.ui.nodeTitleInput.select();
-    }
-
-    showNodeForm(x, y) {
-        // Convert world coords to screen coords
-        const screenPos = this.renderer.worldToScreen(x, y);
-
-        this.ui.nodeForm.style.display = 'flex';
-        this.ui.nodeForm.style.left = `${screenPos.x}px`;
-        this.ui.nodeForm.style.top = `${screenPos.y}px`;
-
-        // Reset visibility of rel input just in case
-        this.ui.nodeRelInput.style.display = (this.state === 'CREATING_NODE' && this.sourceNodeId) ? 'block' : 'none';
-    }
-
-    handleFormKey(e, step) {
-        if (e.key === 'Escape') {
-            this.cancelAction();
-            return;
-        }
-
-        if (e.key === 'Enter') {
-            if (e.shiftKey) {
-                // Quick submit
-                e.preventDefault();
-                this.submitAction();
-                return;
-            }
-
-            e.preventDefault();
-
-            // Step progression
-            if (step === 'TITLE') {
-                this.creationStep = 'BODY';
-                this.ui.nodeBodyInput.focus();
-            } else if (step === 'BODY') {
-                if (this.state === 'CREATING_NODE' && this.sourceNodeId) {
-                    this.creationStep = 'REL';
-                    this.ui.nodeRelInput.focus();
-                } else {
-                    this.submitAction();
-                }
-            } else if (step === 'REL') {
-                this.submitAction();
-            }
+    _onNodeClick(id) {
+        if (this.mode === 'SELECT') {
+            // Selection handled by renderer callback
         }
     }
 
-    submitAction() {
-        const title = this.ui.nodeTitleInput.value || 'Untitled';
-        const body = this.ui.nodeBodyInput.value || '';
-        const relLabel = this.ui.nodeRelInput.value;
-
-        if (this.state === 'CREATING_NODE') {
-            const newNode = {
-                id: this.activeNodeId,
-                title,
-                body
-            };
-            this.graph.addNode(newNode);
-
-            // Add relationship
-            if (this.sourceNodeId) {
-                let from, to;
-                if (this.creationType === 'CHILD') {
-                    from = this.sourceNodeId;
-                    to = newNode.id;
-                } else if (this.creationType === 'SIBLING') {
-                    const parent = this.graph.getParent(this.sourceNodeId);
-                    from = parent ? parent.id : null;
-                    to = newNode.id;
-                }
-
-                if (from && to) {
-                    this.graph.addEdge({ from, to, label: relLabel });
-                }
-            }
-
-            // Select new node
-            this.renderer.selectedNodeId = newNode.id;
-
-        } else if (this.state === 'EDITING_NODE') {
-            this.graph.updateNode(this.activeNodeId, { title, body });
-        }
-
-        this.cancelAction(); // Hides form and resets state
-    }
-
-    cancelAction() {
-        this.state = 'IDLE';
-        this.ui.nodeForm.style.display = 'none';
-        this.ui.relForm.style.display = 'none';
-        this.ui.nodeRelInput.style.display = 'block'; // Reset display
-        this.activeNodeId = null;
-        this.sourceNodeId = null;
-        this.renderer.canvas.focus();
-    }
-
-    navigateSpatial(currentId, direction) {
-        const currentPos = this.layout.positions.get(currentId);
-        if (!currentPos) return;
-
-        let bestId = null;
-        let minDistance = Infinity;
-
-        for (const [id, pos] of this.layout.positions) {
-            if (id === currentId) continue;
-
-            const dx = pos.x - currentPos.x;
-            const dy = pos.y - currentPos.y;
-
-            let isValid = false;
-            // Rough directional check
-            if (direction === 'RIGHT' && dx > 0 && Math.abs(dy) < dx * 2) isValid = true;
-            if (direction === 'LEFT' && dx < 0 && Math.abs(dy) < -dx * 2) isValid = true;
-            if (direction === 'DOWN' && dy > 0 && Math.abs(dx) < dy * 2) isValid = true;
-            if (direction === 'UP' && dy < 0 && Math.abs(dx) < -dy * 2) isValid = true;
-
-            if (isValid) {
-                const dist = dx * dx + dy * dy;
-                if (dist < minDistance) {
-                    minDistance = dist;
-                    bestId = id;
-                }
-            }
-        }
-
-        if (bestId) {
-            this.renderer.selectedNodeId = bestId;
-            this.renderer.draw();
+    _onNodeDblClick(id) {
+        if (this.mode === 'SELECT') {
+            this._startEdit(id);
         }
     }
 
-    navigateLogical(currentId, direction) {
-        let targetId = null;
-        if (direction === 'UP') {
-            const parent = this.graph.getParent(currentId);
-            if (parent) targetId = parent.id;
-        } else if (direction === 'DOWN') {
-            const children = this.graph.getChildren(currentId);
-            if (children.length > 0) targetId = children[0].id;
-        } else if (direction === 'RIGHT' || direction === 'LEFT') {
-            const siblings = this.graph.getSiblings(currentId);
-            if (siblings.length > 0) {
-                // Find current index
-                // This is a bit tricky since siblings doesn't include self in my helper
-                // Let's get all children of parent
-                const parent = this.graph.getParent(currentId);
-                if (parent) {
-                    const allChildren = this.graph.getChildren(parent.id);
-                    const idx = allChildren.findIndex(n => n.id === currentId);
-                    if (direction === 'RIGHT' && idx < allChildren.length - 1) targetId = allChildren[idx + 1].id;
-                    if (direction === 'LEFT' && idx > 0) targetId = allChildren[idx - 1].id;
-                }
-            }
-        }
-
-        if (targetId) {
-            this.renderer.selectedNodeId = targetId;
-            this.renderer.draw();
-        }
-    }
-
-    handleMouseDown(e) {
-        if (this.state !== 'IDLE') return;
-
-        const rect = this.renderer.canvas.getBoundingClientRect();
-        const x = e.clientX - rect.left;
-        const y = e.clientY - rect.top;
-
-        const nodeId = this.renderer.getNodeAt(x, y);
-
-        if (nodeId) {
-            // Start Dragging Node
-            this.isDragging = true;
-            this.dragNodeId = nodeId;
-            this.renderer.selectedNodeId = nodeId;
-
-            // Pin the node while dragging
-            const worldPos = this.renderer.screenToWorld(x, y);
-            // We want to grab the node at its center or maintain offset?
-            // For simplicity, let's just pin it. 
-            // Better: calculate offset from node center to mouse to prevent jumping
-            const nodePos = this.layout.positions.get(nodeId);
-            this.dragOffset = {
-                x: nodePos.x - worldPos.x,
-                y: nodePos.y - worldPos.y
-            };
-
-            this.layout.pinNode(nodeId, nodePos.x, nodePos.y);
-
-        } else {
-            // Deselect if clicked background
-            this.renderer.selectedNodeId = null;
-        }
-
-        this.renderer.draw();
-    }
-
-    handleMouseMove(e) {
-        if (this.isDragging && this.dragNodeId) {
-            const rect = this.renderer.canvas.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-
-            const worldPos = this.renderer.screenToWorld(x, y);
-
-            // Apply drag offset
-            const newX = worldPos.x + this.dragOffset.x;
-            const newY = worldPos.y + this.dragOffset.y;
-
-            this.layout.pinNode(this.dragNodeId, newX, newY);
-        }
-    }
-
-    handleMouseUp(e) {
-        if (this.isDragging && this.dragNodeId) {
-            // Stop dragging
-            // Optional: keep it pinned? Or unpin to let physics take over?
-            // Spec usually implies "drag to position", so we might want to keep it pinned 
-            // OR let it settle. For now let's unpin but with 0 velocity so it stays roughly there unless pushed.
-            // Actually, for "manual arrangement", pinning is better. 
-            // But if user wants auto-layout, they might want unpin.
-            // Let's unpin for now to keep the "floating" feel, but set velocity to 0.
-
-            // Decision: release pin so physics continues.
-            this.layout.unpinNode(this.dragNodeId);
-
-            this.isDragging = false;
-            this.dragNodeId = null;
+    _onBackgroundClick() {
+        if (this.mode === 'EDIT') {
+            this._cancelEdit();
         }
     }
 }

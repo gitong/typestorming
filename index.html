@@ -5,7 +5,8 @@
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/vite.svg" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>TypeStorming</title>
+  <title>TypeStorming — Markdown Mind Storming</title>
+  <meta name="description" content="TypeStorming: Markdown-first visual mind storming. Turn plain text into interactive node-and-edge graphs.">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link
@@ -17,25 +18,14 @@
 <body>
   <div id="app">
     <div id="toolbar">
+      <span id="mode-indicator" class="mode-badge">SELECT</span>
       <button id="view-toggle" class="btn">Switch to Editor (Ctrl+M)</button>
       <button id="download-btn" class="btn" style="display: none;">Download</button>
       <button id="copy-btn" class="btn" style="display: none;">Copy to Clipboard</button>
     </div>
 
     <div id="canvas-container">
-      <canvas id="graph-canvas"></canvas>
-
-      <!-- Node Creation/Edit Form -->
-      <div id="node-form" class="floating-form" style="display: none;">
-        <input type="text" id="node-title-input" placeholder="Node Title" class="form-input title-input">
-        <textarea id="node-body-input" placeholder="Description/Body" class="form-input body-input"></textarea>
-        <input type="text" id="node-rel-input" placeholder="Relationship Label (optional)" class="form-input rel-input">
-      </div>
-
-      <!-- Relationship Edit Form -->
-      <div id="rel-form" class="floating-form" style="display: none;">
-        <input type="text" id="rel-label-input" placeholder="Relationship Label" class="form-input rel-input">
-      </div>
+      <!-- SVG is created dynamically by the Renderer -->
 
       <!-- Spotlight Search Overlay -->
       <div id="spotlight-overlay" style="display: none;">
@@ -51,6 +41,15 @@
     </div>
 
     <div id="toast">Copied to clipboard!</div>
+
+    <!-- Keyboard shortcut legend (bottom-left) -->
+    <div id="shortcut-legend">
+      <div class="legend-row"><kbd>Enter</kbd> New Sibling</div>
+      <div class="legend-row"><kbd>Tab</kbd> Indent Child</div>
+      <div class="legend-row"><kbd>Space</kbd> Edit Node</div>
+      <div class="legend-row"><kbd>Ctrl+K</kbd> Search</div>
+      <div class="legend-row"><kbd>Ctrl+Z</kbd> Undo</div>
+    </div>
   </div>
   <script type="module" src="/src/main.js"></script>
 </body>
