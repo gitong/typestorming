@@ -113,6 +113,11 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+// ───── Re-Layout Button ─────
+document.getElementById('relayout-btn').addEventListener('click', () => {
+  layout.reLayout();
+});
+
 // ───── Editor sync ─────
 markdownEditor.addEventListener('input', () => {
   localStorage.setItem('typestorming-data', markdownEditor.value);

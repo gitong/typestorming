@@ -101,4 +101,14 @@ export class ForceLayout {
     stop() {
         if (this.simulation) this.simulation.stop();
     }
+
+    reLayout() {
+        // Unpin all nodes
+        for (const datum of this.nodeData) {
+            datum.fx = null;
+            datum.fy = null;
+        }
+        // Restart simulation with high alpha for full re-layout
+        this.simulation.alpha(1).restart();
+    }
 }

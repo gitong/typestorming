@@ -28,6 +28,23 @@
     <div id="canvas-container">
       <!-- SVG is created dynamically by the Renderer -->
 
+      <!-- Re-Layout Button -->
+      <button id="relayout-btn" style="
+        position: absolute;
+        bottom: 16px;
+        right: 16px;
+        z-index: 30;
+        padding: 8px 16px;
+        background: #312e81;
+        border: 1px solid #6366f1;
+        border-radius: 8px;
+        color: #c4b5fd;
+        font-family: Inter, sans-serif;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.2s;
+      ">⟳ Re-Layout</button>
+
       <!-- Spotlight Search Overlay -->
       <div id="spotlight-overlay" style="display: none;">
         <div class="spotlight-container">
@@ -49,7 +66,7 @@
       <div class="legend-row"><kbd>Tab</kbd> Create Child</div>
       <div class="legend-row"><kbd>Space</kbd> Edit Node</div>
       <div class="legend-row"><kbd>-</kbd> Link to Node</div>
-      <div class="legend-row"><kbd>Ctrl+K</kbd> Search</div>
+      <div class="legend-row"><kbd>\</kbd> Next Field / Finish</div>
       <div class="legend-row"><kbd>Ctrl+Z</kbd> Undo</div>
     </div>
   </div>

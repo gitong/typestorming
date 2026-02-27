@@ -56,12 +56,7 @@ export class InputHandler {
         // Ignore keys when in markdown editor textarea
         if (e.target.id === 'markdown-editor') return;
 
-        // Spotlight toggle (Ctrl+K)
-        if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-            e.preventDefault();
-            this._toggleSpotlight('search');
-            return;
-        }
+        // (Ctrl+K search removed)
 
         // Undo / Redo
         if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
@@ -212,47 +207,90 @@ export class InputHandler {
         const pos = this.renderer.getNodeScreenPosition(nodeId);
         if (!pos) return;
 
+        const nw = this.renderer.nodeWidth;
+        const nh = this.renderer.nodeHeight;
+
         const overlay = document.createElement('div');
         overlay.id = 'inline-edit-overlay';
         overlay.style.cssText = `
       position: absolute;
-      left: ${pos.x - 80}px;
-      top: ${pos.y - 16}px;
+      left: ${pos.x - nw / 2}px;
+      top: ${pos.y - nh / 2}px;
+      width: ${nw}px;
+      height: ${nh}px;
       z-index: 50;
       pointer-events: auto;
-    `;
-
-        const input = document.createElement('input');
-        input.type = 'text';
-        input.id = 'inline-edit-input';
-        input.value = initialValue || '';
-        input.placeholder = this.editField === 'title' ? 'Title…' : 'Body…';
-        input.style.cssText = `
-      width: 160px;
-      padding: 6px 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 2px;
       background: #1e293b;
       border: 2px solid #6366f1;
-      border-radius: 6px;
+      border-radius: 10px;
+      box-shadow: 0 0 20px rgba(99, 102, 241, 0.5);
+    `;
+
+        const node = this.graph.nodes.get(nodeId);
+
+        // Title input
+        const titleInput = document.createElement('input');
+        titleInput.type = 'text';
+        titleInput.id = 'inline-edit-title';
+        titleInput.value = node ? node.title : '';
+        titleInput.placeholder = 'Title…';
+        titleInput.style.cssText = `
+      width: ${nw - 20}px;
+      padding: 2px 4px;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid rgba(99, 102, 241, 0.3);
       color: #f8fafc;
       font-family: Inter, sans-serif;
-      font-size: ${this.editField === 'title' ? '14px' : '12px'};
-      font-weight: ${this.editField === 'title' ? 'bold' : 'normal'};
+      font-size: 13px;
+      font-weight: bold;
       outline: none;
       text-align: center;
     `;
 
-        input.addEventListener('keydown', (e) => this._handleEditKey(e));
+        // Body input
+        const bodyInput = document.createElement('input');
+        bodyInput.type = 'text';
+        bodyInput.id = 'inline-edit-body';
+        bodyInput.value = node ? (node.body || '') : '';
+        bodyInput.placeholder = 'Body…';
+        bodyInput.style.cssText = `
+      width: ${nw - 20}px;
+      padding: 2px 4px;
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      font-family: Inter, sans-serif;
+      font-size: 11px;
+      font-weight: normal;
+      outline: none;
+      text-align: center;
+    `;
 
-        overlay.appendChild(input);
+        titleInput.addEventListener('keydown', (e) => this._handleEditKey(e));
+        bodyInput.addEventListener('keydown', (e) => this._handleEditKey(e));
+
+        overlay.appendChild(titleInput);
+        overlay.appendChild(bodyInput);
         document.getElementById('canvas-container').appendChild(overlay);
 
         this.editOverlay = overlay;
-        this.editInput = input;
+        this.editInput = titleInput;
+        this.bodyInput = bodyInput;
 
-        // Focus and select
         requestAnimationFrame(() => {
-            input.focus();
-            input.select();
+            if (this.editField === 'title') {
+                titleInput.focus();
+                titleInput.select();
+            } else {
+                bodyInput.focus();
+                bodyInput.select();
+            }
         });
     }
 
@@ -262,26 +300,29 @@ export class InputHandler {
         }
         this.editOverlay = null;
         this.editInput = null;
+        this.bodyInput = null;
     }
 
     _handleEditKey(e) {
         // Prevent global handler from re-processing
-        if (e.target !== this.editInput) return;
+        // Accept events from either title or body input
+        if (e.target.id !== 'inline-edit-title' && e.target.id !== 'inline-edit-body') return;
 
         // Backslash: switch from title to body
         if (e.key === '\\' && this.editField === 'title') {
             e.preventDefault();
-            // Save title, switch to body
-            const node = this.graph.nodes.get(this.editingNodeId);
-            if (node) {
-                this.graph.updateNode(this.editingNodeId, { title: this.editInput.value });
+            // Save title from title input
+            const titleInput = document.getElementById('inline-edit-title');
+            if (titleInput) {
+                this.graph.updateNode(this.editingNodeId, { title: titleInput.value });
             }
             this.editField = 'body';
-            this.editInput.value = node ? node.body : '';
-            this.editInput.placeholder = 'Body…';
-            this.editInput.style.fontWeight = 'normal';
-            this.editInput.style.fontSize = '12px';
-            this.editInput.select();
+            const bodyInput = document.getElementById('inline-edit-body');
+            if (bodyInput) {
+                this.editInput = bodyInput;
+                bodyInput.focus();
+                bodyInput.select();
+            }
             return;
         }
 
@@ -320,13 +361,12 @@ export class InputHandler {
     _finishEditSave() {
         if (!this.editingNodeId) return;
         const node = this.graph.nodes.get(this.editingNodeId);
-        if (node && this.editInput) {
+        if (node) {
             const data = {};
-            if (this.editField === 'title') {
-                data.title = this.editInput.value || 'Untitled';
-            } else {
-                data.body = this.editInput.value || '';
-            }
+            const titleInput = document.getElementById('inline-edit-title');
+            const bodyInput = document.getElementById('inline-edit-body');
+            if (titleInput) data.title = titleInput.value || 'Untitled';
+            if (bodyInput) data.body = bodyInput.value || '';
             this.graph.updateNode(this.editingNodeId, data);
         }
         this.layout.update();
@@ -436,10 +476,10 @@ export class InputHandler {
     _handleEdgeLabelKey(e) {
         if (e.target !== this.editInput) return;
 
-        if (e.key === '|') {
+        if (e.key === '\\') {
             e.preventDefault();
-            // Strip any trailing | from the label
-            const label = (this.editInput.value || '').replace(/\|$/g, '');
+            // Strip any trailing backslash from the label
+            const label = (this.editInput.value || '').replace(/\\$/g, '');
             if (this.pendingEdge) {
                 this.graph.updateEdgeLabel(this.pendingEdge.from, this.pendingEdge.to, label);
                 this.layout.update();
