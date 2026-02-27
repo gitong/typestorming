@@ -436,9 +436,10 @@ export class InputHandler {
     _handleEdgeLabelKey(e) {
         if (e.target !== this.editInput) return;
 
-        if (e.key === 'Enter') {
+        if (e.key === '|') {
             e.preventDefault();
-            const label = this.editInput.value || '';
+            // Strip any trailing | from the label
+            const label = (this.editInput.value || '').replace(/\|$/g, '');
             if (this.pendingEdge) {
                 this.graph.updateEdgeLabel(this.pendingEdge.from, this.pendingEdge.to, label);
                 this.layout.update();
