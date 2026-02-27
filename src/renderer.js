@@ -341,6 +341,7 @@ export class Renderer {
     _updateSelection() {
         const nw = this.nodeWidth;
         const nh = this.nodeHeight;
+        const maxW = 400;
         this.nodeGroup.selectAll('.node-group').each((d, i, els) => {
             const g = d3.select(els[i]);
             const isSelected = d.id === this.selectedNodeId;
@@ -358,31 +359,107 @@ export class Renderer {
                 filter = 'url(#glow)';
             }
 
-            // Auto-resize selected node to show full title
-            let w = nw;
-            if (isSelected && d.title && d.title.length > 18) {
-                const charWidth = 7.5;
-                w = Math.max(nw, d.title.length * charWidth + 30);
-            }
+            if (isSelected) {
+                // Word-wrap title into tspan lines
+                const titleLines = this._wrapText(d.title || '', maxW - 30, 14, 'bold');
+                const bodyLines = this._wrapText(d.body || '', maxW - 30, 12, 'normal');
+                const totalLines = titleLines.length + bodyLines.length;
+                const lineHeight = 18;
+                const h = Math.max(nh, totalLines * lineHeight + 20);
 
-            g.select('.node-rect')
-                .transition().duration(150)
-                .attr('width', w)
-                .attr('height', nh)
-                .attr('x', -w / 2)
-                .attr('y', -nh / 2)
-                .attr('fill', '#1e293b')
-                .attr('stroke', stroke)
-                .attr('stroke-width', strokeWidth)
-                .attr('filter', filter);
+                // Calculate width: fit the longest line but cap at maxW
+                const charWidthTitle = 8.5;
+                const charWidthBody = 7;
+                let longestTitle = 0;
+                for (const line of titleLines) longestTitle = Math.max(longestTitle, line.length * charWidthTitle);
+                let longestBody = 0;
+                for (const line of bodyLines) longestBody = Math.max(longestBody, line.length * charWidthBody);
+                const w = Math.min(maxW, Math.max(nw, Math.max(longestTitle, longestBody) + 30));
 
-            // Update title: show full text when selected, truncate otherwise
-            g.select('.node-title')
-                .text(() => {
-                    if (isSelected) return d.title;
-                    return d.title.length > 22 ? d.title.substring(0, 19) + '…' : d.title;
+                g.select('.node-rect')
+                    .transition().duration(10)
+                    .attr('width', w)
+                    .attr('height', h)
+                    .attr('x', -w / 2)
+                    .attr('y', -h / 2)
+                    .attr('fill', '#1e293b')
+                    .attr('stroke', stroke)
+                    .attr('stroke-width', strokeWidth)
+                    .attr('filter', filter);
+
+                // Title: multi-line tspans
+                const titleEl = g.select('.node-title');
+                titleEl.selectAll('tspan').remove();
+                titleEl.text(null);
+                const titleStartY = -h / 2 + 16;
+                titleLines.forEach((line, idx) => {
+                    titleEl.append('tspan')
+                        .attr('x', 0)
+                        .attr('dy', idx === 0 ? 0 : lineHeight)
+                        .text(line);
                 });
+                titleEl.attr('y', titleStartY);
+
+                // Body: multi-line tspans
+                const bodyEl = g.select('.node-body');
+                bodyEl.selectAll('tspan').remove();
+                bodyEl.text(null);
+                const bodyStartY = titleStartY + titleLines.length * lineHeight + 4;
+                bodyLines.forEach((line, idx) => {
+                    bodyEl.append('tspan')
+                        .attr('x', 0)
+                        .attr('dy', idx === 0 ? 0 : lineHeight)
+                        .text(line);
+                });
+                bodyEl.attr('y', bodyStartY);
+            } else {
+                // Default size
+                g.select('.node-rect')
+                    .transition().duration(10)
+                    .attr('width', nw)
+                    .attr('height', nh)
+                    .attr('x', -nw / 2)
+                    .attr('y', -nh / 2)
+                    .attr('fill', '#1e293b')
+                    .attr('stroke', stroke)
+                    .attr('stroke-width', strokeWidth)
+                    .attr('filter', filter);
+
+                // Title: single line truncated
+                const titleEl = g.select('.node-title');
+                titleEl.selectAll('tspan').remove();
+                titleEl.text(d.title.length > 22 ? d.title.substring(0, 19) + '…' : d.title)
+                    .attr('y', -8);
+
+                // Body: single line truncated
+                const bodyEl = g.select('.node-body');
+                bodyEl.selectAll('tspan').remove();
+                const b = d.body || '';
+                bodyEl.text(b.length > 25 ? b.substring(0, 22) + '…' : b)
+                    .attr('y', 14);
+            }
         });
+    }
+
+    _wrapText(text, maxWidth, fontSize, fontWeight) {
+        if (!text) return [''];
+        const charWidth = fontWeight === 'bold' ? fontSize * 0.62 : fontSize * 0.58;
+        const maxChars = Math.floor(maxWidth / charWidth);
+        const words = text.split(' ');
+        const lines = [];
+        let currentLine = '';
+
+        for (const word of words) {
+            const testLine = currentLine ? currentLine + ' ' + word : word;
+            if (testLine.length > maxChars && currentLine) {
+                lines.push(currentLine);
+                currentLine = word;
+            } else {
+                currentLine = testLine;
+            }
+        }
+        if (currentLine) lines.push(currentLine);
+        return lines.length > 0 ? lines : [''];
     }
 
     _drag() {
