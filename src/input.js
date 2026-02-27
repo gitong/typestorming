@@ -171,6 +171,13 @@ export class InputHandler {
             }
             return;
         }
+
+        // Dash (-): open spotlight to link selected node to another
+        if ((e.key === '-' || e.key === 'Minus') && selectedId) {
+            e.preventDefault();
+            this._toggleSpotlight('link', selectedId);
+            return;
+        }
     }
 
     // ========================================
@@ -564,7 +571,7 @@ export class InputHandler {
     // SPOTLIGHT SEARCH
     // ========================================
 
-    _toggleSpotlight(mode = 'search') {
+    _toggleSpotlight(mode = 'search', linkSourceId = null) {
         const overlay = document.getElementById('spotlight-overlay');
         const input = document.getElementById('spotlight-input');
 
@@ -579,7 +586,8 @@ export class InputHandler {
         this.spotlightOpen = true;
         this.spotlightMode = mode;
         if (mode === 'link') {
-            this.spotlightLinkSource = this.editingNodeId;
+            // Use explicit source ID if provided, otherwise fall back to editingNodeId
+            this.spotlightLinkSource = linkSourceId || this.editingNodeId;
             // Finish current edit mode save before opening spotlight
             if (this.mode === 'EDIT') {
                 this._finishEditSave();
@@ -664,13 +672,21 @@ export class InputHandler {
 
     _selectSearchResult(node) {
         if (this.spotlightMode === 'link' && this.spotlightLinkSource) {
-            // Link mode: create edge from source to selected
-            this.graph.addEdge({ from: this.spotlightLinkSource, to: node.id, label: '' });
+            // Link mode: create edge from source to selected, then enter Edge Label Mode
+            const from = this.spotlightLinkSource;
+            const to = node.id;
+            this.graph.addEdge({ from, to, label: '' });
             this.layout.update();
             this._toggleSpotlight();
-            this.mode = 'SELECT';
+
+            // Enter Edge Label Mode for the new edge
+            this.pendingEdge = this.graph.edges[this.graph.edges.length - 1];
+            this.renderer.selectedNodeId = from;
+            this.renderer._updateSelection();
             this.editingNodeId = null;
             this.spotlightLinkSource = null;
+            this.mode = 'EDGE_LABEL';
+            this._showEdgeLabelOverlay(this.pendingEdge);
         } else {
             // Search mode: jump to node
             this._toggleSpotlight();
