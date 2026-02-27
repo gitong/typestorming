@@ -16,6 +16,7 @@ export class Renderer {
         this.onNodeClick = null;
         this.onNodeDblClick = null;
         this.onBackgroundClick = null;
+        this.onEdgeClick = null;
         this.onDragEnd = null;
 
         // Node sizing
@@ -145,7 +146,16 @@ export class Renderer {
             .attr('stroke', '#6366f1')
             .attr('stroke-width', 2)
             .attr('marker-end', 'url(#arrowhead)')
-            .attr('stroke-opacity', 0.7);
+            .attr('stroke-opacity', 0.7)
+            .attr('cursor', 'pointer');
+
+        // Click on edge path to edit label
+        edgeEnter.on('click', (event, d) => {
+            event.stopPropagation();
+            const from = d.source.id || d.source;
+            const to = d.target.id || d.target;
+            if (this.onEdgeClick) this.onEdgeClick(from, to);
+        });
 
         const allEdges = edgeEnter.merge(edgePaths);
         allEdges.attr('d', d => this._edgePath(d, edgeSet));
@@ -171,7 +181,16 @@ export class Renderer {
             .attr('dominant-baseline', 'central')
             .attr('fill', '#94a3b8')
             .attr('font-size', '11px')
-            .attr('font-family', 'Inter, sans-serif');
+            .attr('font-family', 'Inter, sans-serif')
+            .attr('cursor', 'pointer');
+
+        // Click on edge label to edit it
+        labelEnter.on('click', (event, d) => {
+            event.stopPropagation();
+            const from = d.source.id || d.source;
+            const to = d.target.id || d.target;
+            if (this.onEdgeClick) this.onEdgeClick(from, to);
+        });
 
         const allLabels = labelEnter.merge(edgeLabels);
         allLabels.each((d, i, els) => {
@@ -320,6 +339,8 @@ export class Renderer {
     }
 
     _updateSelection() {
+        const nw = this.nodeWidth;
+        const nh = this.nodeHeight;
         this.nodeGroup.selectAll('.node-group').each((d, i, els) => {
             const g = d3.select(els[i]);
             const isSelected = d.id === this.selectedNodeId;
@@ -336,11 +357,31 @@ export class Renderer {
                 strokeWidth = 2;
                 filter = 'url(#glow)';
             }
+
+            // Auto-resize selected node to show full title
+            let w = nw;
+            if (isSelected && d.title && d.title.length > 18) {
+                const charWidth = 7.5;
+                w = Math.max(nw, d.title.length * charWidth + 30);
+            }
+
             g.select('.node-rect')
+                .transition().duration(150)
+                .attr('width', w)
+                .attr('height', nh)
+                .attr('x', -w / 2)
+                .attr('y', -nh / 2)
                 .attr('fill', '#1e293b')
                 .attr('stroke', stroke)
                 .attr('stroke-width', strokeWidth)
                 .attr('filter', filter);
+
+            // Update title: show full text when selected, truncate otherwise
+            g.select('.node-title')
+                .text(() => {
+                    if (isSelected) return d.title;
+                    return d.title.length > 22 ? d.title.substring(0, 19) + '…' : d.title;
+                });
         });
     }
 

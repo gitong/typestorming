@@ -39,6 +39,7 @@ export class InputHandler {
         this.renderer.onNodeClick = (id) => this._onNodeClick(id);
         this.renderer.onNodeDblClick = (id) => this._onNodeDblClick(id);
         this.renderer.onBackgroundClick = () => this._onBackgroundClick();
+        this.renderer.onEdgeClick = (from, to) => this._onEdgeClick(from, to);
 
         // Spotlight
         const spotlightInput = document.getElementById('spotlight-input');
@@ -804,5 +805,16 @@ export class InputHandler {
         if (this.mode === 'EDIT') {
             this._cancelEdit();
         }
+    }
+
+    _onEdgeClick(from, to) {
+        if (this.mode !== 'SELECT') return;
+        // Find the edge in the graph
+        const edge = this.graph.edges.find(e => e.from === from && e.to === to);
+        if (!edge) return;
+        // Enter Edge Label Mode for this edge
+        this.pendingEdge = edge;
+        this.mode = 'EDGE_LABEL';
+        this._showEdgeLabelOverlay(edge);
     }
 }
