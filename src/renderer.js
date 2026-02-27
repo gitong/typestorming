@@ -12,6 +12,7 @@ export class Renderer {
         this.layout = layout;
 
         this.selectedNodeId = null;
+        this.secondarySelectedNodeId = null;
         this.onNodeClick = null;
         this.onNodeDblClick = null;
         this.onBackgroundClick = null;
@@ -104,6 +105,7 @@ export class Renderer {
         this.svg.on('click', (event) => {
             if (event.target === this.svg.node()) {
                 this.selectedNodeId = null;
+                this.secondarySelectedNodeId = null;
                 this._updateSelection();
                 if (this.onBackgroundClick) this.onBackgroundClick();
             }
@@ -246,9 +248,7 @@ export class Renderer {
         // Click + Dblclick on node
         nodeEnter.on('click', (event, d) => {
             event.stopPropagation();
-            this.selectedNodeId = d.id;
-            this._updateSelection();
-            if (this.onNodeClick) this.onNodeClick(d.id);
+            if (this.onNodeClick) this.onNodeClick(d.id, event.shiftKey);
         });
 
         nodeEnter.on('dblclick', (event, d) => {
@@ -317,11 +317,24 @@ export class Renderer {
         this.nodeGroup.selectAll('.node-group').each((d, i, els) => {
             const g = d3.select(els[i]);
             const isSelected = d.id === this.selectedNodeId;
+            const isSecondary = d.id === this.secondarySelectedNodeId;
+            let stroke = '#334155';
+            let strokeWidth = 1;
+            let filter = 'none';
+            if (isSelected) {
+                stroke = '#6366f1';
+                strokeWidth = 2.5;
+                filter = 'url(#glow)';
+            } else if (isSecondary) {
+                stroke = '#22d3ee';
+                strokeWidth = 2;
+                filter = 'url(#glow)';
+            }
             g.select('.node-rect')
                 .attr('fill', '#1e293b')
-                .attr('stroke', isSelected ? '#6366f1' : '#334155')
-                .attr('stroke-width', isSelected ? 2.5 : 1)
-                .attr('filter', isSelected ? 'url(#glow)' : 'none');
+                .attr('stroke', stroke)
+                .attr('stroke-width', strokeWidth)
+                .attr('filter', filter);
         });
     }
 

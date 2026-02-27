@@ -106,10 +106,22 @@ export class InputHandler {
     _handleSelectKey(e) {
         const selectedId = this.renderer.selectedNodeId;
 
-        // Enter: create sibling
+        // Enter: create sibling OR connect two selected nodes
         if (e.key === 'Enter' && !e.ctrlKey && !e.shiftKey) {
             e.preventDefault();
-            if (selectedId) {
+            // If two nodes are selected (multi-select), connect them
+            if (selectedId && this.renderer.secondarySelectedNodeId) {
+                const from = selectedId;
+                const to = this.renderer.secondarySelectedNodeId;
+                // Add edge and enter Edge Label Mode
+                this.graph.addEdge({ from, to, label: '' });
+                this.layout.update();
+                this.pendingEdge = this.graph.edges[this.graph.edges.length - 1];
+                this.renderer.secondarySelectedNodeId = null;
+                this.renderer._updateSelection();
+                this.mode = 'EDGE_LABEL';
+                this._showEdgeLabelOverlay(this.pendingEdge);
+            } else if (selectedId) {
                 this._createSibling(selectedId);
             } else {
                 this._createRootNode();
@@ -143,6 +155,7 @@ export class InputHandler {
         // Escape: deselect
         if (e.key === 'Escape') {
             this.renderer.selectedNodeId = null;
+            this.renderer.secondarySelectedNodeId = null;
             this.renderer._updateSelection();
             return;
         }
@@ -687,9 +700,17 @@ export class InputHandler {
     // MOUSE CALLBACKS
     // ========================================
 
-    _onNodeClick(id) {
+    _onNodeClick(id, shiftKey) {
         if (this.mode === 'SELECT') {
-            // Selection handled by renderer callback
+            if (shiftKey && this.renderer.selectedNodeId && this.renderer.selectedNodeId !== id) {
+                // Shift+Click: set as secondary selection
+                this.renderer.secondarySelectedNodeId = id;
+            } else {
+                // Normal click: set as primary, clear secondary
+                this.renderer.selectedNodeId = id;
+                this.renderer.secondarySelectedNodeId = null;
+            }
+            this.renderer._updateSelection();
         }
     }
 
