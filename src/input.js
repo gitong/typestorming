@@ -16,6 +16,7 @@ export class InputHandler {
         this.editField = 'title'; // 'title' or 'body'
         this.preEditState = null; // for cancel/revert
         this.pendingEdge = null; // { from, to } for edge label mode
+        this.lastCreatedNodeId = null; // track latest created node
 
         // Inline editing overlay
         this.editOverlay = null;
@@ -161,13 +162,22 @@ export class InputHandler {
         }
 
         // Arrow keys: spatial navigation
-        if (e.key.startsWith('Arrow') && selectedId) {
+        if (e.key.startsWith('Arrow')) {
             e.preventDefault();
+            let navId = selectedId;
+            // If no node selected, auto-select the latest created node
+            if (!navId && this.lastCreatedNodeId && this.graph.nodes.has(this.lastCreatedNodeId)) {
+                navId = this.lastCreatedNodeId;
+                this.renderer.selectedNodeId = navId;
+                this.renderer._updateSelection();
+                return;
+            }
+            if (!navId) return;
             const dir = e.key.replace('Arrow', '').toUpperCase();
             if (e.shiftKey) {
-                this._navigateLogical(selectedId, dir);
+                this._navigateLogical(navId, dir);
             } else {
-                this._navigateSpatial(selectedId, dir);
+                this._navigateSpatial(navId, dir);
             }
             return;
         }
@@ -429,7 +439,6 @@ export class InputHandler {
         if (e.key === 'Enter') {
             e.preventDefault();
             const label = this.editInput.value || '';
-            const targetNodeId = this.pendingEdge ? this.pendingEdge.to : null;
             if (this.pendingEdge) {
                 this.graph.updateEdgeLabel(this.pendingEdge.from, this.pendingEdge.to, label);
                 this.layout.update();
@@ -438,9 +447,9 @@ export class InputHandler {
             this.mode = 'SELECT';
             this.editingNodeId = null;
             this.pendingEdge = null;
-            // Select the target node for continued navigation
-            if (targetNodeId) {
-                this.renderer.selectedNodeId = targetNodeId;
+            // Select the latest created node for continued navigation
+            if (this.lastCreatedNodeId && this.graph.nodes.has(this.lastCreatedNodeId)) {
+                this.renderer.selectedNodeId = this.lastCreatedNodeId;
                 this.renderer._updateSelection();
             }
             return;
@@ -448,14 +457,13 @@ export class InputHandler {
 
         if (e.key === 'Escape') {
             e.preventDefault();
-            const targetNodeId = this.pendingEdge ? this.pendingEdge.to : null;
             this._removeEditOverlay();
             this.mode = 'SELECT';
             this.editingNodeId = null;
             this.pendingEdge = null;
-            // Select the target node for continued navigation
-            if (targetNodeId) {
-                this.renderer.selectedNodeId = targetNodeId;
+            // Select the latest created node for continued navigation
+            if (this.lastCreatedNodeId && this.graph.nodes.has(this.lastCreatedNodeId)) {
+                this.renderer.selectedNodeId = this.lastCreatedNodeId;
                 this.renderer._updateSelection();
             }
             return;
@@ -471,6 +479,7 @@ export class InputHandler {
     _createRootNode() {
         const id = this.graph.generateId();
         this.graph.addNode({ id, title: '', body: '', level: 1 });
+        this.lastCreatedNodeId = id;
         this.layout.update();
         this.renderer.selectedNodeId = id;
         this.renderer._updateSelection();
@@ -483,6 +492,7 @@ export class InputHandler {
         const parent = this.graph.getParent(selectedId);
         const newId = this.graph.generateId();
         this.graph.addNode({ id: newId, title: '', body: '', level: 1 });
+        this.lastCreatedNodeId = newId;
 
         if (parent) {
             this.graph.addEdge({ from: parent.id, to: newId, label: '' });
@@ -499,6 +509,7 @@ export class InputHandler {
         const newId = this.graph.generateId();
         this.graph.addNode({ id: newId, title: '', body: '', level: 1 });
         this.graph.addEdge({ from: parentId, to: newId, label: '' });
+        this.lastCreatedNodeId = newId;
 
         this.layout.update();
         this.renderer.selectedNodeId = newId;

@@ -58,18 +58,24 @@ export class Renderer {
             .attr('width', '200%')
             .attr('height', '200%');
         glowFilter.append('feGaussianBlur')
-            .attr('stdDeviation', '4')
+            .attr('stdDeviation', '8')
             .attr('result', 'blur');
         glowFilter.append('feFlood')
             .attr('flood-color', '#6366f1')
-            .attr('flood-opacity', '0.6')
+            .attr('flood-opacity', '0.9')
             .attr('result', 'color');
         glowFilter.append('feComposite')
             .attr('in', 'color')
             .attr('in2', 'blur')
             .attr('operator', 'in')
             .attr('result', 'shadow');
+        // Add a second, wider blur for a strong outer glow
+        glowFilter.append('feGaussianBlur')
+            .attr('in', 'shadow')
+            .attr('stdDeviation', '6')
+            .attr('result', 'outerGlow');
         const glowMerge = glowFilter.append('feMerge');
+        glowMerge.append('feMergeNode').attr('in', 'outerGlow');
         glowMerge.append('feMergeNode').attr('in', 'shadow');
         glowMerge.append('feMergeNode').attr('in', 'SourceGraphic');
 
