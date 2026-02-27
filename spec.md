@@ -1,5 +1,5 @@
 # typeStorming — Specification
-### version 0.2.1
+### version 0.2.7
 ### Gherkin Format Specification
 
 
@@ -303,7 +303,9 @@ The canvas operates in one of three distinct modes. The current mode determines 
 ### Scenario: Re-Layout for Optimal Readability
 **When** the user clicks the **⟳ Re-Layout** button (bottom-right of canvas)
 **Then** all pinned nodes are unpinned
-**And** the force simulation restarts with full energy
+**And** a BFS tree-layout algorithm pre-positions nodes by depth level from root nodes
+**And** the force simulation restarts to refine positions
+**And** edge crossings are minimized by arranging connected components hierarchically
 **And** nodes settle into an optimally spaced arrangement
 
 ### Scenario: Collapsible & Semantic Zooming
@@ -346,9 +348,16 @@ The canvas operates in one of three distinct modes. The current mode determines 
 ### Scenario: Confirming a labeled relationship
 
 **Given** the user is in **Edge Label Mode** for a pending connection between Node A and Node B
-**When** the user types a label and presses `Enter`
+**When** the user types a label and presses `\`
 **Then** a labeled relationship `A -[label]-> B` should be appended to the Relationships section
-**And** the app returns to **Select Mode**
+**And** the app returns to **Select Mode** with the **newly created node selected**
+
+### Scenario: Editing an existing edge label (Click on edge)
+
+**Given** the user is in **Select Mode**
+**When** the user clicks on an existing edge line or edge label text
+**Then** the app transitions to **Edge Label Mode** for that edge
+**And** the user can type a new label and press `\` to save, or `Escape` to cancel
 
 ### Scenario: Deleting a node
 
@@ -430,10 +439,10 @@ The canvas operates in one of three distinct modes. The current mode determines 
 
 ## Feature 9: Visual Properties & Aesthetics
 
-* **Edge Aesthetics:** Simple line, bold, filled bold, dashed, or crossing paths. Arrows can have a "clean infographic" or "natural hand-drawn" style.
+* **Edge Aesthetics:** Simple line, bold, filled bold, dashed, or crossing paths. Arrows can have a "clean infographic" or "natural hand-drawn" style. Edge paths and labels are clickable to edit.
 * **Arrow Centering:** Edges aim for the absolute center of the bubble, optionally penetrating slightly inside the border for a natural connection.
 * **Pin Properties:** Anchors position securely against auto-layout changes and prevents hiding during parent collapses.
-* **Node Container Width:** Nodes have a maximum width of approximately 6 words. Text will automatically wrap to the next line if it exceeds this width, ensuring all content remains neatly confined within the node container.
+* **Node Container Width:** Default width 170px. When selected, nodes auto-expand (max 400px, 10ms transition) with word-wrapping for both title and body. Height adjusts dynamically based on line count. Reverts to original size when deselected.
 * **Node Metadata:** Supports custom properties including Labels, Descriptions, Time, Date, and other metrics.
 
 ---
