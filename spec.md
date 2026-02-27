@@ -5,7 +5,9 @@
 
 ## Context: Markdown-First Mind Storming
 
-**The Problem:** Traditional mind-mapping tools lock your data inside proprietary formats. You can't read, version-control, or edit your graphs with a text editor.
+**The Problem:**
+1. **Lack of smooth ideation through typing:** Traditional visual tools often interrupt your flow with mouse-heavy interactions.
+2. **Vendor data lock-in:** Traditional mind-mapping tools lock your data inside proprietary formats. You can't read, version-control, or edit your graphs with a text editor.
 
 **The Solution:** A web app where the **source of truth is a Markdown file** using a human-readable graph notation. The app's job is: 
 (1) **render** the markdown into a visual canvas, and 
@@ -22,15 +24,15 @@ All graph data is stored as plain Markdown text (`.md` files) in the app's **ded
 
 ### Phase 1 — Define Nodes
 
-Nodes are declared first, each with a **title** and **body**:
+Nodes are declared first, containing a **Title** and **Body**:
 
 ```
-NodeID[title: "...", body: "..."]
+NodeID[#Title is Here; Body Content is here]
 ```
 
 - **NodeID** — a short unique identifier for the node.
-- **title** — the display name of the node.
-- **body** — the descriptive content inside the node.
+- **Title** — the display name of the node. Starts with a markdown header (e.g., `#`, `##`) to denote node importance or hierarchy.
+- **Body** — the descriptive content inside the node, separated from the title by a semicolon (`;`).
 
 ### Phase 2 — Register Relationships
 
@@ -48,10 +50,10 @@ A -[label]-> B         # labeled relationship
 
 ```markdown
 ## Nodes
-A[title: "Define the problem", body: "Identify the core pain point and scope"]
-B[title: "Research solutions", body: "Survey existing tools and approaches"]
-C[title: "Prototype v1", body: "Build a quick proof-of-concept"]
-D[title: "Write documentation", body: "Document findings and decisions"]
+A[#Define the problem; Identify the core pain point and scope]
+B[#Research solutions; Survey existing tools and approaches]
+C[#Prototype v1; Build a quick proof-of-concept]
+D[#Write documentation; Document findings and decisions]
 
 ## Relationships
 A -[leads to]-> B
@@ -82,7 +84,7 @@ The app **reads** the markdown text and **renders** it as a visual node-and-edge
 
 **Given** the user opens or pastes valid markdown graph text
 **When** the app processes the text
-**Then** each `NodeID[title, body]` declaration should appear as a visual node on the canvas
+**Then** each `NodeID[#Title; Body]` declaration should appear as a visual node on the canvas
 **And** each `-->` or `-[label]->` should appear as a directional arrow between the corresponding nodes
 **And** labeled edges should display their label text along the arrow path
 
@@ -114,28 +116,27 @@ The app **reads** the markdown text and **renders** it as a visual node-and-edge
 
 The app provides a **visual interface** so users can build and edit the graph without manually typing the arrow syntax. Every visual action produces valid markdown text.
 
-### Scenario: Creating a child node (Tab)
+### Scenario: Creating a new sibling node (Enter)
 
-**Given** the user has selected an existing node A
-**When** the user presses `Tab`
-**Then** a new node declaration `NewNode[title: "", body: ""]` should be appended to the Nodes section
-**And** a new relationship `A --> NewNode` should be appended to the Relationships section
+**Given** the user is focused on a node A
+**When** the user presses `Enter`
+**Then** a new node declaration `NewNode[#; ]` should be appended to the Nodes section
+**And** it should be created at the same hierarchical level as node A
 **And** the focus should shift to the new node for title input
 
-### Scenario: Creating a sibling node (Shift + Tab)
+### Scenario: Indenting to a child node (Tab)
 
-**Given** the user is focused on a child node A that has a parent node P
+**Given** the user is focused on a node B that immediately follows node A
+**When** the user presses `Tab`
+**Then** node B is indented and becomes a child of node A
+**And** a relationship `A --> B` should be added to the Relationships section
+
+### Scenario: Outdenting to a sibling node (Shift + Tab)
+
+**Given** the user is focused on a child node B that has a parent node A
 **When** the user presses `Shift + Tab`
-**Then** a new node declaration `B[title: "", body: ""]` should be appended to the Nodes section
-**And** a new relationship `P --> B` should be appended to the Relationships section
-**And** focus should shift to node B
-
-### Scenario: Creating an independent node (Shift + Enter)
-
-**When** the user presses `Shift + Enter`
-**Then** a new unlinked node should appear on the canvas
-**And** a standalone node declaration `NewNode[title: "", body: ""]` should be appended to the Nodes section (with no relationship)
-**And** focus should shift to the new node
+**Then** node B is outdented to become a sibling of node A
+**And** the relationship in the markdown updates accordingly
 
 ### Scenario: Adding a label to a relationship
 
@@ -144,68 +145,45 @@ The app provides a **visual interface** so users can build and edit the graph wi
 **Then** the relationship in the markdown should update from `A --> B` to `A -[label]-> B`
 **And** the label should be displayed along the arrow on the canvas
 
-### Scenario: Editing node content inline
+### Scenario: Editing node content inline (Space / Enter)
 
-**Given** the user double-clicks (or presses Enter on) an existing node
-**When** the user edits the node's title or body
-**Then** the corresponding `NodeID[title: "...", body: "..."]` line in the Nodes section should be updated
+**Given** the user has selected an existing node
+**When** the user presses `Space` (or double-clicks)
+**Then** the node enters edit mode for its title
+**When** the user presses `;` or `` ` `` while typing the title
+**Then** the editor shifts to editing the body content of the node
+**And** the corresponding `NodeID[#Title; Body]` line in the Nodes section should be updated interactively
+
+### Scenario: Linking an existing related node (Ctrl + Enter)
+
+**Given** the user is currently editing a node (title or body)
+**When** the user presses `Ctrl + Enter`
+**Then** a spotlight search bar appears to find existing nodes
+**When** the user types to find a related node and presses `Enter` to select it
+**Then** the selected node is placed as a related node
+**And** a relationship is seamlessly appended to the markdown
 
 ---
 
 ## Feature 3: Keyboard-Driven Canvas Interaction
 
-### Scenario Outline: Creating nodes via keyboard shortcuts
+### Scenario Outline: Modifying nodes via keyboard shortcuts
 
-**Given** the user is focused on Node <CurrentNode>
+**Given** the user is interacting with Node <CurrentNode>
 **When** the user presses the "<Shortcut>" key combination
-**Then** a <NodeType> should be created
-**And** the relationship status should be "<RelationshipStatus>"
-**And** the correct markdown should be appended to the Nodes and Relationships sections
-**And** the cursor flow should follow this sequence:
-
-1. **Cursor on title** — the user types the node title
-2. **`Enter`** — moves cursor to the **body** field
-3. **`Enter`** — moves cursor to the **relationship label** field
-4. **`Enter`** — submits the node (completes creation)
-
-> **`Shift + Enter`** at any step → **quick submit**: immediately creates the node, leaving any remaining fields empty (body = empty, relationship = unlabeled)
+**Then** the specified <Action> should occur
+**And** the corresponding updates in the Markdown should be applied
 
 **Examples:**
-| CurrentNode | Shortcut       | NodeType          | RelationshipStatus       |
-| :---------- | :------------- | :---------------- | :----------------------- |
-| Root        | `Tab`          | Child Node        | Linked from Root         |
-| Root        | `Ctrl + Enter` | Independent Node  | Unlinked (standalone)    |
-| Node A      | `Tab`          | Child Node        | Linked from Node A       |
-| Node A      | `Shift + Tab`  | Sibling Node      | Linked to Parent of A    |
-| Any Node & Edge | `Shift + Enter`| —             | Edit Mode (node & relationship) |
-
----
-
-### Scenario: Edit Mode (Shift + Enter)
-
-**Given** the user has selected an existing node
-**When** the user presses `Shift + Enter`
-**Then** the cursor should enter **edit mode** on the selected node's **title** field
-**And** `Enter` moves the cursor to the **body** field
-**And** `Enter` again exits edit mode and commits changes to the markdown
-
-### Scenario: Navigating relationships with Shift + Arrow
-
-**Given** the user has selected a node with one or more relationships
-**When** the user presses `Shift + Arrow` key
-**Then** the selection should move to the **relationship edge** in that direction
-**And** the relationship label should become editable
-**And** `Shift + Arrow` again moves to the **next connected relationship**
-
-**Examples:**
-| Shortcut              | Action                                         |
-| :-------------------- | :--------------------------------------------- |
-| `alt + Right`       | Select the outgoing relationship to the right   |
-| `alt + Left`        | Select the outgoing relationship to the left    |
-| `alt + Up`          | Select the relationship to the parent node      |
-| `alt + Down`        | Select the relationship to the first child node, and follow by next child node |
-
----
+| CurrentNode  | Shortcut       | Action               | Explanation                                  |
+| :----------- | :------------- | :------------------- | :------------------------------------------- |
+| Any Node     | `Enter`        | Create Sibling       | Creates a new node at the same level         |
+| Any Node     | `Tab`          | Indent to Child      | Moves node to be a child of the previous node|
+| Child Node   | `Shift + Tab`  | Outdent to Sibling   | Moves node back to be a sibling              |
+| Any Node     | `Space`        | Edit Node            | Enters edit mode for the current node bounds |
+| Editing Node | `;` or `` ` `` | Edit Body Content    | Shifts focus from title to body input        |
+| Editing Node | `Ctrl + Enter` | Link Existing Node   | Opens spotlight search to find & link a node |
+| Inside Node  | `Shift + Enter`| Insert New Line      | Inserts new line in text editor              |
 
 ### Scenario Outline: Spatial vs. Logical Navigation
 
@@ -236,46 +214,61 @@ The app provides a **visual interface** so users can build and edit the graph wi
 
 ---
 
-## Feature 4: Quick Search and Linking
+## Feature 4: Quick Search and Linking Bar
 
-### Scenario: Quick Add Relationship 
+### Scenario: Global Quick Search & Jump (Cmd/Ctrl + Space)
+
+**When** the user presses `Cmd + Space`
+**Then** a quick search bar appears (spotlight style)
+**And** matching a keyword instantly highlights, selects, and jumps to that node
+**And** from the quick search bar, pressing `Tab` creates a new child node
+**Or** the user can connect the current node to an existing node
+
+### Scenario: Quick Connect (Ctrl + Tab)
 
 **Given** the user is focused on Node A
-**When** the user triggers the "Quick add relationship" keyboard shortcut
-**Then** a spotlight-style search popup should appear (centered, floating overlay)
-
-**When** the user types in the search field
-**Then** the list should filter existing nodes in real-time by matching title or body text
-
-**When** the user navigates the results using `Arrow Up` / `Arrow Down`
-**And** presses `Enter` to select Node B
-**Then** a relationship `A --> B` should be appended to the Relationships section of the markdown
-**And** the spotlight popup should close
-**And** the canvas should re-center to show both nodes
+**When** the user presses `Ctrl + Tab`
+**Then** the spotlight quicksearch popup appears specifically to link nodes
+**When** the user searches for and selects Node B
+**Then** a relationship `A --> B` is seamlessly appended in the markdown
+**And** the canvas visually draws the edge and re-centers if necessary
 
 ---
 
-## Feature 5: Automatic Layout
+## Feature 5: Automatic Layout & Organization
 
-### Scenario: Tension-based auto-layout
+### Scenario: Dynamic Auto-layout
+**Given** the canvas has multiple nodes, edges, or clusters
+**When** a new element is added
+**Then** the system recalculates the layout
+**And** the layout algorithm considers:
+- **Relative distance** or **Fixed distance (opt-in)**
+- Maintaining established distances between elements
+- **Weighted importance** derived from Heading levels (`#`, `##`) and content volume
+**And** disconnected nodes automatically receive a static, aligned position unless manually dragged
 
-**Given** the canvas has multiple nodes and relationships
-**When** a new node or relationship is added
-**Then** the system should calculate the optimal spatial distribution using a tension-based algorithm
-**And** the nodes should animate smoothly to their new positions to prevent overlap
+### Scenario: Collapsible & Semantic Zooming
+**When** a user collapses a node
+**Then** its children hide, unless explicitly **Pinned** (anchored positional override)
+**And** `Ctrl + Shift + 0` mass-collapses to main roots (`+` increases expansion, `-` collapses further)
+**When** the user zooms out (Gmaps-style)
+**Then** visually less important nodes (with lower headings) fade out
+**And** at high zoom levels, only top tier `#1` Heading nodes remain visible
 
-### Scenario: User-adjusted layout preference
+### Scenario: Clustering
+**When** the user groups nodes based on Label or Selection
+**Then** a **Cluster** is formed (which supports nested clusters)
+**And** the overall layout dynamically adjusts around this cluster
+**And** AI can recommend natural clustering groups based on node content
 
-**Given** the auto-layout has positioned nodes on the canvas
-**When** the user manually drags or rearranges nodes to a preferred composition
-**Then** the system should record the new spatial proportions as a **layout preference**
-**And** when auto-layout recalculates (e.g. after adding a new node), it should respect the user's preferred proportions
-**And** new nodes should be placed in a way that maintains the overall composition the user established
+### Scenario: Bulk Heading Adjustment
+**When** multiple nodes are selected
+**Then** a bulk operation can demote or promote their heading hierarchy, adjusting their visual importance score without changing the core text content
 ---
 
 ## Feature 6: Node & Relationship Management
 
-### Scenario: Creating a relationship between two existing nodes
+### Scenario: Initiating a relationship between two existing nodes
 
 **Given** the user has selected Node A
 **And** the user has selected Node B (multi-selection)
@@ -283,9 +276,15 @@ The app provides a **visual interface** so users can build and edit the graph wi
 **Then** the cursor should be placed on the **label field** of the new relationship
 **And** the relationship should be displayed on the canvas as a pending connection
 
+### Scenario: Confirming an unlabeled relationship
+
+**Given** a pending connection between Node A and Node B
 **When** the user presses `Enter` without typing any text
 **Then** an unlabeled relationship `A --> B` should be appended to the Relationships section
 
+### Scenario: Confirming a labeled relationship
+
+**Given** a pending connection between Node A and Node B
 **When** the user types a label and presses `Enter`
 **Then** a labeled relationship `A -[label]-> B` should be appended to the Relationships section
 
@@ -342,6 +341,50 @@ The app provides a **visual interface** so users can build and edit the graph wi
 **When** the user pastes text from the clipboard (`Ctrl + V`)
 **Then** the pasted markdown should replace or merge into the current content
 **And** switching to Canvas view should render the updated graph
+
+---
+
+## Feature 8: Merge & Split Functions
+
+### Scenario: Interactive Merging
+**Given** the user selects nodes (via spatial lasso or connected edges)
+**When** the user activates the merge function
+**Then** the nodes combine while keeping their historical lineage
+**And** merging options include:
+- Auto-merge headings with headings, content with content
+- AI-recommended unified heading and content
+- Manual rewrite of one or both nodes
+
+### Scenario: Splitting Nodes
+**When** the user splits a node
+**Then** the historical connection is maintained
+**And** a new edge automatically connects the split results to the specified parent
+
+---
+
+## Feature 9: Visual Properties & Aesthetics
+
+* **Edge Aesthetics:** Simple line, bold, filled bold, dashed, or crossing paths. Arrows can have a "clean infographic" or "natural hand-drawn" style.
+* **Arrow Centering:** Edges aim for the absolute center of the bubble, optionally penetrating slightly inside the border for a natural connection.
+* **Pin Properties:** Anchors position securely against auto-layout changes and prevents hiding during parent collapses.
+* **Node Metadata:** Supports custom properties including Labels, Descriptions, Time, Date, and other metrics.
+
+---
+
+## Feature 10: Multiple Format Views
+
+1. **Mindmap (Default):** Relative locations with the first node automatically pinned to the center.
+2. **Linear / Block Editor:** Node editor style similar to Obsidian block mode. Links are presented visually inline like `<-[:link:]` or `[:link:]->`, but are always saved in the Markdown Relationships section to preserve the single source of truth.
+3. **Kanban Version:** Card-based rendering akin to Miro planning boards.
+4. **Canvas Mode:** High-level bubbles can be clicked to enter an isolated detail page context.
+
+---
+
+## Feature 11: Braindump Use Case
+
+* Built for rapid text entry in list/content form (brainstorming style).
+* Unconnected text entries automatically align to a static position unless mapped.
+* Includes AI function to subsequently parse the text blocks into distinct node clusters.
 
 ---
 
