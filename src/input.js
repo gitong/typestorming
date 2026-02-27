@@ -258,8 +258,8 @@ export class InputHandler {
         // Prevent global handler from re-processing
         if (e.target !== this.editInput) return;
 
-        // Semicolon or backtick: switch from title to body
-        if ((e.key === ';' || e.key === '`') && this.editField === 'title') {
+        // Backslash: switch from title to body
+        if (e.key === '\\' && this.editField === 'title') {
             e.preventDefault();
             // Save title, switch to body
             const node = this.graph.nodes.get(this.editingNodeId);
@@ -429,6 +429,7 @@ export class InputHandler {
         if (e.key === 'Enter') {
             e.preventDefault();
             const label = this.editInput.value || '';
+            const targetNodeId = this.pendingEdge ? this.pendingEdge.to : null;
             if (this.pendingEdge) {
                 this.graph.updateEdgeLabel(this.pendingEdge.from, this.pendingEdge.to, label);
                 this.layout.update();
@@ -437,15 +438,26 @@ export class InputHandler {
             this.mode = 'SELECT';
             this.editingNodeId = null;
             this.pendingEdge = null;
+            // Select the target node for continued navigation
+            if (targetNodeId) {
+                this.renderer.selectedNodeId = targetNodeId;
+                this.renderer._updateSelection();
+            }
             return;
         }
 
         if (e.key === 'Escape') {
             e.preventDefault();
+            const targetNodeId = this.pendingEdge ? this.pendingEdge.to : null;
             this._removeEditOverlay();
             this.mode = 'SELECT';
             this.editingNodeId = null;
             this.pendingEdge = null;
+            // Select the target node for continued navigation
+            if (targetNodeId) {
+                this.renderer.selectedNodeId = targetNodeId;
+                this.renderer._updateSelection();
+            }
             return;
         }
 

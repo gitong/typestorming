@@ -18,9 +18,9 @@ export class ForceLayout {
     init() {
         this.simulation = d3.forceSimulation()
             .force('charge', d3.forceManyBody().strength(-800))
-            .force('link', d3.forceLink().id(d => d.id).distance(200).strength(0.3))
+            .force('link', d3.forceLink().id(d => d.id).distance(300).strength(0.3))
             .force('center', d3.forceCenter(0, 0))
-            .force('collide', d3.forceCollide().radius(100))
+            .force('collide', d3.forceCollide().radius(150))
             .alphaDecay(0.02)
             .on('tick', () => {
                 if (this.onTick) this.onTick();
