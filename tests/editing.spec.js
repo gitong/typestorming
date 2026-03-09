@@ -26,9 +26,9 @@ test.describe('Feature 2: Inline Editing', () => {
     await clickFirstNode(page);
     await page.keyboard.press(' ');
 
-    // Clear existing title and type new one
-    await page.keyboard.press('Control+a');
-    await page.keyboard.type('My New Title');
+    // Wait for overlay and input to be ready before typing
+    await expect(page.locator('#inline-edit-overlay')).toBeVisible();
+    await page.locator('#inline-edit-title').fill('My New Title');
     await page.keyboard.press('Enter');
     // May enter Edge Label Mode — press Escape to return to Select
     await page.keyboard.press('Escape');

@@ -14,10 +14,9 @@ test.describe('Feature 2: Undo / Redo', () => {
 
     await expect(nodes(page)).toHaveCount(before + 1);
 
-    // _cancelEdit pushes an extra undo entry (updateNode), so two Ctrl+Z needed
-    // to reach back before the addNode
-    await page.keyboard.press('Control+z'); // undoes the cancel's updateNode
-    await page.keyboard.press('Control+z'); // undoes the addNode
+    // addNode + addEdge are batched into one undo entry; a second Ctrl+Z is a no-op
+    await page.keyboard.press('Control+z'); // undoes the batched create
+    await page.keyboard.press('Control+z'); // no-op (extra safety)
     await expect(nodes(page)).toHaveCount(before);
   });
 

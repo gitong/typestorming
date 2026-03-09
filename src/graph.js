@@ -61,6 +61,20 @@ export class GraphModel {
         this._redoStack = [];
     }
 
+    /** Begin a batch: push one undo entry for all operations until endBatch(). */
+    beginBatch() {
+        if (!this._batchActive) {
+            this._undoStack.push(this.getMarkdown());
+            if (this._undoStack.length > 50) this._undoStack.shift();
+            this._redoStack = [];
+            this._batchActive = true;
+        }
+    }
+
+    endBatch() {
+        this._batchActive = false;
+    }
+
     undo() {
         if (this._undoStack.length === 0) return;
         // Save current state to redo

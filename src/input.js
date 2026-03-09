@@ -402,10 +402,13 @@ export class InputHandler {
     }
 
     _cancelEdit() {
-        // Revert to pre-edit state
+        // Revert to pre-edit state only if something actually changed
         if (this.editingNodeId && this.preEditState) {
-            this.graph.updateNode(this.editingNodeId, this.preEditState);
-            this.layout.update();
+            const node = this.graph.nodes.get(this.editingNodeId);
+            if (node && (node.title !== this.preEditState.title || node.body !== this.preEditState.body)) {
+                this.graph.updateNode(this.editingNodeId, this.preEditState);
+                this.layout.update();
+            }
         }
         this._removeEditOverlay();
         this.mode = 'SELECT';
@@ -520,7 +523,9 @@ export class InputHandler {
 
     _createRootNode() {
         const id = this.graph.generateId();
+        this.graph.beginBatch();
         this.graph.addNode({ id, title: '', body: '', level: 1 });
+        this.graph.endBatch();
         this.lastCreatedNodeId = id;
         this.layout.update();
         this.renderer.selectedNodeId = id;
@@ -533,12 +538,13 @@ export class InputHandler {
     _createSibling(selectedId) {
         const parent = this.graph.getParent(selectedId);
         const newId = this.graph.generateId();
+        this.graph.beginBatch();
         this.graph.addNode({ id: newId, title: '', body: '', level: 1 });
-        this.lastCreatedNodeId = newId;
-
         if (parent) {
             this.graph.addEdge({ from: parent.id, to: newId, label: '' });
         }
+        this.graph.endBatch();
+        this.lastCreatedNodeId = newId;
 
         this.layout.update();
         this.renderer.selectedNodeId = newId;
@@ -549,8 +555,10 @@ export class InputHandler {
 
     _createChild(parentId) {
         const newId = this.graph.generateId();
+        this.graph.beginBatch();
         this.graph.addNode({ id: newId, title: '', body: '', level: 1 });
         this.graph.addEdge({ from: parentId, to: newId, label: '' });
+        this.graph.endBatch();
         this.lastCreatedNodeId = newId;
 
         this.layout.update();
